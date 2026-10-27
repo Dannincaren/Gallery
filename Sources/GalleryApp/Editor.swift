@@ -1,0 +1,285 @@
+import SwiftUI
+import GalleryCore
+
+struct GalleryEditor: View {
+    @ObservedObject var store: GalleryStore
+    @ObservedObject var runtime: CursorRuntime
+    @State private var playing = true
+    @State private var selectedFrame = 0
+    @State private var previewStart = Date()
+    @State private var showSettings = false
+    init(store: GalleryStore) { self.store = store; self.runtime = store.runtime }
+    var body: some View {
+        NavigationSplitView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.blue)
+                    VStack(alignment: .leading) {
+                        Text("Gallery").font(.title2.bold())
+                        Text("让指针有自己的节奏").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(.horizontal, 14).padding(.top, 18)
+                TextField("主题名称", text: $store.theme.name).font(.headline).textFieldStyle(.roundedBorder)
+                    .disabled(runtime.enabled).padding(.horizontal, 14)
+                    .onChange(of: store.theme.name) { _, _ in store.changed() }
+                List(selection: $store.selectedRole) {
+                    Section("光标角色") {
+                        ForEach(store.theme.roles) { role in
+                            HStack {
+                                Image(systemName: role.name.contains("文本") ? "text.cursor" : "cursorarrow")
+                                    .foregroundStyle(store.selectedRole == role.id ? Color.white : Color.secondary).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(role.name).foregroundStyle(store.selectedRole == role.id ? Color.white : Color.primary)
+                                    Text("\(role.clips.count) 个状态").font(.caption2)
+                                        .foregroundStyle(store.selectedRole == role.id ? Color.white.opacity(0.8) : Color.secondary)
+                                }
+                            }.padding(.vertical, 4).tag(role.id)
+                        }
+                    }
+                }.listStyle(.sidebar)
+                Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
+                    .buttonStyle(.plain).padding(16)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+        } detail: {
+            VStack(spacing: 0) {
+                statusBar
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(store.roleIndex.map { store.theme.roles[$0].name } ?? "光标").font(.largeTitle.bold())
+                                Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
+                        }
+                        Picker("动画状态", selection: $store.selectedMotion) {
+                            ForEach(Motion.allCases) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented)
+                        if let clip = store.clip {
+                            clipEditor(clip)
+                        } else {
+                            ContentUnavailableView {
+                                Label("尚未设置\(store.selectedMotion.title)动画", systemImage: "film.stack")
+                            } description: {
+                                Text("可以复制常态开始编辑，或直接导入动画文件。未设置时使用常态光标。")
+                            } actions: {
+                                Button("从常态复制") { store.createClip() }
+                                Button("导入动画") { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
+                            }.frame(minHeight: 360).disabled(runtime.enabled)
+                        }
+                    }.padding(28)
+                }
+                HStack {
+                    Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
+                    Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Gallery 0.1 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup {
+                Button { store.openTheme() } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
+                Menu {
+                    Button("从 PRTS Windows 包导入交互动画…") { store.importPRTS() }
+                    Button("导出 Gallery 主题…") { store.exportTheme() }
+                    Button("导出常态 Mousecape 主题…") { store.exportTheme(cape: true) }
+                    Divider()
+                    Button("载入内置示例") { store.resetDemo() }
+                } label: { Label("主题", systemImage: "ellipsis.circle") }
+                Button {
+                    if runtime.enabled { runtime.stop() } else { store.saveNow(); runtime.start(store.theme) }
+                } label: {
+                    Label(runtime.enabled ? "停用并恢复" : "应用主题", systemImage: runtime.enabled ? "pause.circle.fill" : "play.circle.fill")
+                }.tint(runtime.enabled ? .orange : .blue)
+            }
+        }
+        .sheet(isPresented: $showSettings) { InteractionSettings(store: store, runtime: runtime) }
+        .alert("Gallery", isPresented: Binding(get: { store.message != nil || runtime.error != nil }, set: { if !$0 { store.message = nil; runtime.error = nil } })) {
+            Button("好") { store.message = nil; runtime.error = nil }
+        } message: { Text(runtime.error ?? store.message ?? "") }
+        .onChange(of: store.selectedRole) { _, _ in selectedFrame = 0; previewStart = Date() }
+        .onChange(of: store.selectedMotion) { _, _ in selectedFrame = 0; previewStart = Date() }
+        .frame(minWidth: 960, minHeight: 700)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+    private var statusBar: some View {
+        HStack(spacing: 9) {
+            Image(systemName: runtime.enabled ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(runtime.enabled ? .green : .secondary)
+            Text(runtime.status).font(.callout)
+            Spacer()
+            if runtime.hasRecovery && !runtime.enabled { Button("恢复上次光标") { runtime.recover() } }
+        }.padding(.horizontal, 24).padding(.vertical, 13).background(.quaternary.opacity(0.35))
+    }
+    @ViewBuilder private func clipEditor(_ clip: CursorClip) -> some View {
+        HStack(alignment: .top, spacing: 24) {
+            VStack(spacing: 12) {
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !playing)) { context in
+                    let elapsed = max(0, context.date.timeIntervalSince(previewStart))
+                    let n = playing ? Int(elapsed / clip.frameDuration) : selectedFrame
+                    let index = playing && !store.selectedMotion.loops ? min(n, clip.frames.count - 1) : n % clip.frames.count
+                    HotspotPreview(clip: clip, frame: max(0, min(index, clip.frames.count - 1)), editable: !runtime.enabled) { x, y in
+                        store.edit { $0.hotX = x; $0.hotY = y }
+                    }
+                }.frame(minWidth: 320, minHeight: 300).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
+                HStack {
+                    Button { playing.toggle(); previewStart = Date() } label: {
+                        Label(playing ? "暂停预览" : "播放预览", systemImage: playing ? "pause.fill" : "play.fill")
+                    }
+                    Button { previewStart = Date(); playing = true } label: { Image(systemName: "backward.end.fill") }.help("重新播放")
+                    Spacer()
+                    Text("\(clip.frames.count) 帧 · \(clip.duration, specifier: "%.2f") 秒").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Text("在预览中点击，设置实际点击位置。红色十字为热点。").font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                Text("热点与尺寸").font(.headline)
+                number("热点 X", value: clip.hotX, range: 0...max(0, clip.width - 0.01)) { v in store.edit { $0.hotX = v } }
+                number("热点 Y", value: clip.hotY, range: 0...max(0, clip.height - 0.01)) { v in store.edit { $0.hotY = v } }
+                number("宽度", value: clip.width, range: 1...128) { v in store.edit { $0.width = v; $0.hotX = min($0.hotX, v - 0.01) } }
+                number("高度", value: clip.height, range: 1...128) { v in store.edit { $0.height = v; $0.hotY = min($0.hotY, v - 0.01) } }
+                Text("以上单位均为逻辑点，适配 Retina 屏幕。").font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Text("播放速度").font(.headline)
+                number("每秒帧数", value: 1 / clip.frameDuration, range: 0.1...240) { v in store.edit { $0.frameDuration = 1 / v } }
+                Text(store.selectedMotion.loops ? "此状态循环播放。" : "播放一次后进入下一状态；提前松手会立即播放松手动画。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if clip.frames.count > 24 {
+                    Label("系统播放会采样为 24 帧并保留总时长。", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+                }
+            }.frame(width: 210).disabled(runtime.enabled)
+        }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("帧序列").font(.headline)
+                Spacer()
+                Button("替换动画…") { store.importFrames(append: false); selectedFrame = 0 }
+                Button("追加帧…") { store.importFrames(append: true) }
+                if store.selectedMotion != .normal { Button("移除此状态", role: .destructive) { store.removeClip() } }
+            }.disabled(runtime.enabled)
+            ScrollView(.horizontal) {
+                HStack(spacing: 9) {
+                    ForEach(Array(clip.frames.enumerated()), id: \.offset) { index, data in
+                        Button { selectedFrame = index; playing = false } label: {
+                            VStack(spacing: 5) {
+                                if let image = NSImage(data: data) { Image(nsImage: image).resizable().interpolation(.high).scaledToFit().frame(width: 44, height: 44) }
+                                Text(String(format: "%02d", index + 1)).font(.caption2.monospacedDigit())
+                            }.padding(8).background(selectedFrame == index ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selectedFrame == index ? Color.accentColor : .clear))
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(.vertical, 2)
+            }
+            HStack {
+                Button { moveFrame(-1) } label: { Label("前移", systemImage: "arrow.left") }.disabled(selectedFrame <= 0)
+                Button { moveFrame(1) } label: { Label("后移", systemImage: "arrow.right") }.disabled(selectedFrame >= clip.frames.count - 1)
+                Button("删除选中帧", role: .destructive) {
+                    store.edit { $0.frames.remove(at: min(selectedFrame, $0.frames.count - 1)) }
+                    selectedFrame = max(0, min(selectedFrame, clip.frames.count - 2))
+                }.disabled(clip.frames.count <= 1)
+                Spacer()
+                Text("支持 PNG 序列、GIF、Windows CUR / ANI").font(.caption).foregroundStyle(.secondary)
+            }.disabled(runtime.enabled)
+        }.padding(18).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 14))
+    }
+    private func moveFrame(_ offset: Int) {
+        store.edit {
+            let old = min(selectedFrame, $0.frames.count - 1), new = old + offset
+            guard $0.frames.indices.contains(new) else { return }
+            $0.frames.swapAt(old, new); selectedFrame = new
+        }
+    }
+    private func number(_ title: String, value: Double, range: ClosedRange<Double>, set: @escaping (Double) -> Void) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            TextField(title, value: Binding(get: { value }, set: { if $0.isFinite { set(min(range.upperBound, max(range.lowerBound, $0))) } }), format: .number.precision(.fractionLength(0...2)))
+                .multilineTextAlignment(.trailing).textFieldStyle(.roundedBorder).frame(width: 75)
+        }
+    }
+}
+
+private struct HotspotPreview: View {
+    let clip: CursorClip
+    let frame: Int
+    let editable: Bool
+    let set: (Double, Double) -> Void
+    var body: some View {
+        GeometryReader { geometry in
+            let scale = min((geometry.size.width - 48) / clip.width, (geometry.size.height - 48) / clip.height)
+            let width = clip.width * scale, height = clip.height * scale
+            let origin = CGPoint(x: (geometry.size.width - width) / 2, y: (geometry.size.height - height) / 2)
+            ZStack(alignment: .topLeading) {
+                Canvas { context, size in
+                    let step = 16.0
+                    for x in stride(from: 0.0, to: size.width, by: step) {
+                        for y in stride(from: 0.0, to: size.height, by: step) where (Int(x / step) + Int(y / step)) % 2 == 0 {
+                            context.fill(Path(CGRect(x: x, y: y, width: step, height: step)), with: .color(.secondary.opacity(0.06)))
+                        }
+                    }
+                }.clipShape(RoundedRectangle(cornerRadius: 18))
+                if let image = NSImage(data: clip.frames[frame]) {
+                    Image(nsImage: image).resizable().interpolation(.high).frame(width: width, height: height).position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                }
+                Path { p in
+                    let x = origin.x + clip.hotX * scale, y = origin.y + clip.hotY * scale
+                    p.move(to: CGPoint(x: x - 10, y: y)); p.addLine(to: CGPoint(x: x + 10, y: y))
+                    p.move(to: CGPoint(x: x, y: y - 10)); p.addLine(to: CGPoint(x: x, y: y + 10))
+                }.stroke(.red, lineWidth: 1.5)
+            }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onEnded { event in
+                guard editable else { return }
+                set(min(clip.width - 0.01, max(0, (event.location.x - origin.x) / scale)),
+                    min(clip.height - 0.01, max(0, (event.location.y - origin.y) / scale)))
+            })
+        }
+    }
+}
+
+private struct InteractionSettings: View {
+    @ObservedObject var store: GalleryStore
+    @ObservedObject var runtime: CursorRuntime
+    @Environment(\.dismiss) var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("交互与应用").font(.title2.bold())
+            Form {
+                Section("交互动画") {
+                    Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)
+                    HStack {
+                        Text("待机等待时间")
+                        Slider(value: $store.theme.idleDelay, in: 1...60, step: 1)
+                        Text("\(Int(store.theme.idleDelay)) 秒").monospacedDigit().frame(width: 50)
+                    }
+                    Toggle("播放左键按下、按住与松手动画", isOn: $store.theme.clickEnabled)
+                }
+                Section("在这些应用中暂停交互动画") {
+                    ForEach(store.theme.excludedBundleIDs, id: \.self) { id in
+                        HStack { Text(id).font(.caption); Spacer(); Button("移除") { store.theme.excludedBundleIDs.removeAll { $0 == id } } }
+                    }
+                    Menu("添加正在运行的应用…") {
+                        ForEach(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }, id: \.processIdentifier) { app in
+                            if let id = app.bundleIdentifier {
+                                Button(app.localizedName ?? id) { if !store.theme.excludedBundleIDs.contains(id) { store.theme.excludedBundleIDs.append(id) } }
+                            }
+                        }
+                    }
+                    Text("暂停交互时仍保留常态主题。游戏或使用自定义光标的应用可以加入此列表。").font(.caption).foregroundStyle(.secondary)
+                }
+            }.formStyle(.grouped).disabled(runtime.enabled)
+            HStack {
+                Button("检查输入监控授权") { runtime.requestInputAccess() }
+                Button("打开隐私设置") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!) }
+            }
+            Text("Gallery 只观察鼠标，不拦截点击、不记录键盘。锁屏、休眠时尽量恢复常态。请先退出 Mousecape 的自动重应用助手，避免两个工具同时修改主题。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(runtime.diagnostics).font(.caption2.monospaced()).foregroundStyle(.tertiary).textSelection(.enabled)
+            HStack { Spacer(); Button("完成") { store.changed(); dismiss() }.keyboardShortcut(.defaultAction) }
+        }.padding(24).frame(width: 570, height: 650)
+        .onChange(of: store.theme.idleDelay) { _, _ in store.changed() }
+        .onChange(of: store.theme.idleEnabled) { _, _ in store.changed() }
+        .onChange(of: store.theme.clickEnabled) { _, _ in store.changed() }
+        .onChange(of: store.theme.excludedBundleIDs) { _, _ in store.changed() }
+    }
+}

@@ -1,0 +1,22 @@
+name: Build Gallery
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check imports and interaction behavior
+        run: bash Scripts/check.sh
+      - name: Build Universal application
+        env:
+          GALLERY_UNIVERSAL: '1'
+        run: bash Scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Gallery-macOS
+          path: dist/Gallery-macOS.zip
