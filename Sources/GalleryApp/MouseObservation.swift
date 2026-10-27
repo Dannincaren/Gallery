@@ -5,7 +5,7 @@ final class MouseObservation {
     var onEvent: ((CGEventType) -> Void)?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    var active: Bool { tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false }
+    private(set) var active = false
     func start() {
         guard CGPreflightListenEventAccess() else { return }
         let types: [CGEventType] = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
@@ -18,6 +18,7 @@ final class MouseObservation {
                     let observer = Unmanaged<MouseObservation>.fromOpaque(context).takeUnretainedValue()
                     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                         if let tap = observer.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                        observer.active = observer.tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false
                     } else { observer.onEvent?(type) }
                 }
                 return Unmanaged.passUnretained(event)
@@ -26,10 +27,12 @@ final class MouseObservation {
         self.source = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        active = CGEvent.tapIsEnabled(tap: tap)
     }
     func stop() {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         source = nil; tap = nil; onEvent = nil
+        active = false
     }
 }

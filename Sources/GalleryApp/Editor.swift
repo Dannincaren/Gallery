@@ -10,6 +10,10 @@ struct GalleryEditor: View {
     @State private var previewStart = Date()
     @State private var showSettings = false
     @State private var showImport = false
+    @State private var showRoleSource = false
+    @State private var expandedThemes = Set<String>()
+    @State private var editorActive = NSApp.isActive
+    @State private var editorVisible = true
     init(store: GalleryStore) { self.store = store; self.runtime = store.runtime; self.preferences = store.preferences }
     var body: some View {
         NavigationSplitView {
@@ -24,19 +28,38 @@ struct GalleryEditor: View {
                 TextField("主题名称", text: $store.theme.name).font(.headline).textFieldStyle(.roundedBorder)
                     .disabled(runtime.enabled).padding(.horizontal, 14)
                     .onChange(of: store.theme.name) { _, _ in store.changed() }
-                List(selection: $store.selectedRole) {
-                    Section("光标角色") {
-                        ForEach(store.visibleRoles) { role in
-                            HStack {
-                                if let data = role.clip(.normal)?.frames.first, let image = NSImage(data: data) {
-                                    Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
+                List {
+                    Section("主题目录") {
+                        ForEach(store.library) { folder in
+                            DisclosureGroup(isExpanded: Binding(get: { expandedThemes.contains(folder.id) }, set: { open in
+                                if open { expandedThemes.insert(folder.id) } else { expandedThemes.remove(folder.id) }
+                            })) {
+                                ForEach(folder.roles) { role in
+                                    Button {
+                                        store.selectTheme(folder.id, role: role.id)
+                                    } label: {
+                                        HStack(spacing: 9) {
+                                            Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 20)
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(role.name).font(.callout)
+                                                Text(role.usesNative ? "系统原有" : (CursorCatalog.assetOnly(role.id) ? "应用自定义 · 可编辑素材" : "\(role.motionCount) 个动画状态"))
+                                                    .font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }.padding(.vertical, 4).padding(.horizontal, 5)
+                                            .contentShape(Rectangle())
+                                            .background(store.selectedThemeID == folder.id && store.selectedRole == role.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                    }.buttonStyle(.plain)
                                 }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(role.name).foregroundStyle(store.selectedRole == role.id ? Color.white : Color.primary)
-                                    Text(CursorCatalog.assetOnly(role.id) ? "应用自定义 · 可编辑素材" : "\(role.clips.count) 个动画状态").font(.caption2)
-                                        .foregroundStyle(store.selectedRole == role.id ? Color.white.opacity(0.8) : Color.secondary)
-                                }
-                            }.padding(.vertical, 4).tag(role.id)
+                            } label: {
+                                Button {
+                                    if expandedThemes.contains(folder.id) { expandedThemes.remove(folder.id) }
+                                    else { expandedThemes.insert(folder.id) }
+                                    store.selectTheme(folder.id)
+                                } label: {
+                                    Label(folder.name, systemImage: "folder").font(.headline).lineLimit(2)
+                                }.buttonStyle(.plain)
+                            }
                         }
                     }
                 }.listStyle(.sidebar)
@@ -57,19 +80,23 @@ struct GalleryEditor: View {
                             Spacer()
                             Button("导入主题…") { showImport = true }
                             if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
+                            if runtime.enabled && store.activeThemeID != store.selectedThemeID { Button("应用此主题") { store.applyCurrentTheme() } }
                         }
                         HStack(spacing: 12) {
-                            Image(systemName: "cursorarrow"); Text("指针大小")
-                            Slider(value: $preferences.pointerScale, in: 0.5...3).frame(maxWidth: 300)
+                            Image(systemName: "cursorarrow"); Text("全局大小")
+                            Slider(value: Binding(get: { preferences.pointerScale }, set: {
+                                preferences.pointerScale = $0; runtime.setScale($0)
+                            }), in: 0.5...3).frame(maxWidth: 300)
                             Text("\(Int((preferences.pointerScale * 100).rounded()))%")
                                 .monospacedDigit().frame(width: 48)
-                            Button("还原") { preferences.pointerScale = 1 }
+                            Button("还原") { preferences.pointerScale = 1; runtime.setScale(1) }
                             Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
                         }
                         if store.importing {
                             HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
                         }
                         if let index = store.roleIndex {
+                            roleControls(store.theme.roles[index])
                             Toggle("拆分按下、按住与松手动画", isOn: Binding(
                                 get: { store.theme.roles[index].splitClickAnimation }, set: { store.setSplitClick($0) }))
                                 .disabled(runtime.enabled)
@@ -99,7 +126,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.3 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.4 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
@@ -114,7 +141,7 @@ struct GalleryEditor: View {
                     Button("载入内置示例") { store.resetDemo() }
                 } label: { Label("主题", systemImage: "ellipsis.circle") }
                 Button {
-                    if runtime.enabled { runtime.stop() } else { store.saveNow(); runtime.start(store.theme) }
+                    if runtime.enabled { runtime.stop() } else { store.saveNow(); store.applyCurrentTheme() }
                 } label: {
                     Label(runtime.enabled ? "停用并恢复" : "应用主题", systemImage: runtime.enabled ? "pause.circle.fill" : "play.circle.fill")
                 }.tint(runtime.enabled ? .orange : .blue)
@@ -131,7 +158,12 @@ struct GalleryEditor: View {
         } message: { Text(runtime.error ?? store.message ?? "") }
         .onChange(of: store.selectedRole) { _, _ in selectedFrame = 0; previewStart = Date() }
         .onChange(of: store.selectedMotion) { _, _ in selectedFrame = 0; previewStart = Date() }
-        .onReceive(preferences.$pointerScale.debounce(for: .milliseconds(180), scheduler: DispatchQueue.main)) { runtime.setScale($0) }
+        .onAppear { expandedThemes.insert(store.selectedThemeID); editorActive = NSApp.isActive }
+        .background(EditorVisibilityReader(visible: $editorVisible).frame(width: 0, height: 0))
+        .onChange(of: store.selectedThemeID) { _, id in expandedThemes = [id] }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in editorActive = true }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in editorActive = false }
+        .sheet(isPresented: $showRoleSource) { RoleSourcePicker(store: store) }
         .frame(minWidth: 960, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -146,7 +178,7 @@ struct GalleryEditor: View {
     @ViewBuilder private func clipEditor(_ clip: CursorClip) -> some View {
         HStack(alignment: .top, spacing: 24) {
             VStack(spacing: 12) {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !playing)) { context in
+                TimelineView(.animation(minimumInterval: max(1.0 / 60, clip.frameDuration), paused: !playing || clip.frames.count < 2 || !editorActive || !editorVisible || runtime.enabled)) { context in
                     let elapsed = max(0, context.date.timeIntervalSince(previewStart))
                     let n = playing ? Int(elapsed / clip.frameDuration) : selectedFrame
                     let index = playing && !store.selectedMotion.loops ? min(n, clip.frames.count - 1) : n % clip.frames.count
@@ -190,21 +222,25 @@ struct GalleryEditor: View {
                 if store.selectedMotion != .normal { Button("移除此状态", role: .destructive) { store.removeClip() } }
             }.disabled(runtime.enabled)
             ScrollView(.horizontal) {
-                HStack(spacing: 9) {
+                LazyHStack(spacing: 9) {
                     ForEach(Array(clip.frames.enumerated()), id: \.offset) { index, data in
                         Button { selectedFrame = index; playing = false } label: {
                             VStack(spacing: 5) {
-                                if let image = NSImage(data: data) { Image(nsImage: image).resizable().interpolation(.high).scaledToFit().frame(width: 44, height: 44) }
+                                if let image = EditorImageCache.image(data) { Image(nsImage: image).resizable().interpolation(.high).scaledToFit().frame(width: 44, height: 44) }
                                 Text(String(format: "%02d", index + 1)).font(.caption2.monospacedDigit())
                             }.padding(8).background(selectedFrame == index ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(selectedFrame == index ? Color.accentColor : .clear))
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).contextMenu {
+                            Button("复制这一帧") { duplicateFrame(index) }
+                        }
                     }
                 }.padding(.vertical, 2)
             }
             HStack {
                 Button { moveFrame(-1) } label: { Label("前移", systemImage: "arrow.left") }.disabled(selectedFrame <= 0)
                 Button { moveFrame(1) } label: { Label("后移", systemImage: "arrow.right") }.disabled(selectedFrame >= clip.frames.count - 1)
+                Button { duplicateFrame(selectedFrame) } label: { Label("复制当前帧", systemImage: "doc.on.doc") }
+                    .disabled(clip.frames.count >= 240)
                 Button("删除选中帧", role: .destructive) {
                     store.edit { $0.frames.remove(at: min(selectedFrame, $0.frames.count - 1)) }
                     selectedFrame = max(0, min(selectedFrame, clip.frames.count - 2))
@@ -213,6 +249,28 @@ struct GalleryEditor: View {
                 Text("支持 PNG 序列、GIF、Windows CUR / ANI").font(.caption).foregroundStyle(.secondary)
             }.disabled(runtime.enabled)
         }.padding(18).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 14))
+    }
+    private func duplicateFrame(_ index: Int) {
+        if let inserted = store.duplicateFrame(at: index) { selectedFrame = inserted; playing = false }
+    }
+    private func roleControls(_ role: CursorRole) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Text("此角色大小")
+                Slider(value: Binding(get: { role.scale }, set: { store.setRoleScale($0) }), in: 0.5...3)
+                    .frame(maxWidth: 250).disabled(role.usesNative)
+                Text("\(Int((role.scale * 100).rounded()))%") .monospacedDigit().frame(width: 48)
+                Button("还原") { store.setRoleScale(1) }.disabled(role.usesNative)
+                Text("叠加在全局大小之上").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Toggle("使用系统原有光标", isOn: Binding(get: { role.usesNative }, set: { store.setUsesNative($0) }))
+                Spacer()
+                if let name = role.sourceThemeName { Text("素材来自：\(name)").font(.caption).foregroundStyle(.secondary) }
+                Button("从其他主题选取…") { showRoleSource = true }
+            }.disabled(runtime.enabled)
+            if runtime.enabled { Text("暂停后可更换角色来源；大小可以直接调节。").font(.caption).foregroundStyle(.secondary) }
+        }
     }
     private func moveFrame(_ offset: Int) {
         store.edit {
@@ -285,7 +343,7 @@ private struct HotspotPreview: View {
                         }
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 18))
-                if let image = NSImage(data: clip.frames[frame]) {
+                if let image = EditorImageCache.image(clip.frames[frame]) {
                     Image(nsImage: image).resizable().interpolation(.high).frame(width: width, height: height).position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                 }
                 Path { p in

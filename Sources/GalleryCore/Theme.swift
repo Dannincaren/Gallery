@@ -56,6 +56,12 @@ public struct CursorClip: Codable, Equatable {
         result.hotX = hotX * factor; result.hotY = hotY * factor
         return result
     }
+    @discardableResult
+    public mutating func duplicateFrame(at index: Int) throws -> Int {
+        guard frames.indices.contains(index), frames.count < 240 else { throw ThemeError.invalid("无法复制这一帧：最多支持 240 帧。") }
+        frames.insert(frames[index], at: index + 1)
+        return index + 1
+    }
 }
 
 public struct CursorRole: Codable, Equatable, Identifiable {
@@ -63,17 +69,25 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     public var name: String
     public var clips: [String: CursorClip]
     public var splitClickAnimation: Bool
-    public init(id: String, name: String, clips: [String: CursorClip], splitClickAnimation: Bool? = nil) {
+    public var scale: Double
+    public var usesNative: Bool
+    public var sourceThemeName: String?
+    public init(id: String, name: String, clips: [String: CursorClip], splitClickAnimation: Bool? = nil,
+                scale: Double = 1, usesNative: Bool = false, sourceThemeName: String? = nil) {
         self.id = id; self.name = name; self.clips = clips
         self.splitClickAnimation = splitClickAnimation ?? CursorCatalog.isArrow(id)
+        self.scale = scale; self.usesNative = usesNative; self.sourceThemeName = sourceThemeName
     }
-    private enum CodingKeys: String, CodingKey { case id, name, clips, splitClickAnimation }
+    private enum CodingKeys: String, CodingKey { case id, name, clips, splitClickAnimation, scale, usesNative, sourceThemeName }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         clips = try c.decode([String: CursorClip].self, forKey: .clips)
         splitClickAnimation = try c.decodeIfPresent(Bool.self, forKey: .splitClickAnimation) ?? CursorCatalog.isArrow(id)
+        scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? 1
+        usesNative = try c.decodeIfPresent(Bool.self, forKey: .usesNative) ?? false
+        sourceThemeName = try c.decodeIfPresent(String.self, forKey: .sourceThemeName)
     }
     public func clip(_ motion: Motion) -> CursorClip? { clips[motion.rawValue] }
 }
@@ -97,7 +111,7 @@ public struct GalleryTheme: Codable, Equatable {
             throw ThemeError.invalid("主题格式、角色或待机时间无效。")
         }
         for role in roles {
-            guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil,
+            guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil, role.scale.isFinite, (0.5...3).contains(role.scale),
                   role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }) else {
                 throw ThemeError.invalid("每个光标必须有常态动画及有效的系统标识。")
             }

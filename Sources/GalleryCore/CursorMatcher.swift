@@ -9,7 +9,11 @@ public struct CursorFingerprint: Hashable {
     let hotX: Int
     let hotY: Int
     public init?(data: Data, width: Double, height: Double, hotX: Double, hotY: Double) {
-        guard let image = try? CursorImages.bitmap(data), width > 0, height > 0, image.width <= 2048, image.height <= 2048 else { return nil }
+        guard let image = try? CursorImages.bitmap(data) else { return nil }
+        self.init(image: image, width: width, height: height, hotX: hotX, hotY: hotY)
+    }
+    public init?(image: CGImage, width: Double, height: Double, hotX: Double, hotY: Double) {
+        guard width > 0, height > 0, image.width <= 2048, image.height <= 2048 else { return nil }
         let w = image.width, h = image.height
         var rgba = [UInt8](repeating: 0, count: w * h * 4)
         let ok = rgba.withUnsafeMutableBytes { buffer -> Bool in
@@ -48,8 +52,18 @@ public struct CursorFingerprint: Hashable {
     }
 }
 
+public struct CursorIdentification: Equatable, Sendable {
+    public var roles: [String]
+    public var appliedRoles: [String]
+    public static let unknown = CursorIdentification(roles: [], appliedRoles: [])
+}
+
 public struct CursorMatcher {
-    private var entries: [CursorFingerprint: Set<String>] = [:]
+    private struct Entry {
+        var roles = Set<String>()
+        var applied = Set<String>()
+    }
+    private var entries: [CursorFingerprint: Entry] = [:]
     private var animatedFrameCounts = Set<Int>()
     public init() {}
     public mutating func addRepresentations(_ dictionary: [String: Any], role: String) {
@@ -58,57 +72,73 @@ public struct CursorMatcher {
             if let clip = try? CursorImages.fromCape(one) { add(clip, role: role) }
         }
     }
-    public mutating func add(_ clip: CursorClip, role: String) {
+    public mutating func add(_ clip: CursorClip, role: String, applied: Bool = false) {
         if clip.frames.count > 1 { animatedFrameCounts.insert(clip.sampled().frames.count) }
         for frame in clip.sampled().frames {
             if let sample = CursorFingerprint(data: frame, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY) {
-                entries[sample, default: []].insert(role)
+                var entry = entries[sample] ?? Entry()
+                entry.roles.insert(role)
+                if applied { entry.applied.insert(role) }
+                entries[sample] = entry
             }
         }
     }
-    /// WindowServer returns a complete vertical filmstrip for an animated
-    /// registered cursor, but its global-data API omits the frame count.
-    /// Only try counts present in our registered resources, and require the
-    /// first, middle and last frames to agree on the role.
-    public func matchCurrent(_ dictionary: [String: Any]) -> [String] {
-        if let height = dictionary["PointsHigh"] as? NSNumber, height.doubleValue <= 128,
-           let clip = try? CursorImages.fromCape(dictionary) {
-            let result = match(clip)
-            if !result.isEmpty { return result }
+    private func identify(_ sample: CursorFingerprint) -> CursorIdentification {
+        if let exact = entries[sample] { return .init(roles: exact.roles.sorted(), appliedRoles: exact.applied.sorted()) }
+        var best = 0.075, roles = Set<String>(), applied = Set<String>()
+        for (candidate, entry) in entries {
+            guard abs(sample.aspect - candidate.aspect) <= 160,
+                  abs(sample.hotX - candidate.hotX) <= 180, abs(sample.hotY - candidate.hotY) <= 180 else { continue }
+            let budget = Int((best + 0.001) * Double(sample.pixels.count * 15))
+            var error = 0
+            for i in sample.pixels.indices {
+                error += abs(Int(sample.pixels[i]) - Int(candidate.pixels[i]))
+                if error > budget { break }
+            }
+            guard error <= budget else { continue }
+            let distance = Double(error) / Double(sample.pixels.count * 15)
+            if distance < best - 0.001 { best = distance; roles = entry.roles; applied = entry.applied }
+            else if distance <= best + 0.001 && distance < 0.075 { roles.formUnion(entry.roles); applied.formUnion(entry.applied) }
         }
-        guard let height = dictionary["PointsHigh"] as? NSNumber,
-              let width = dictionary["PointsWide"] as? NSNumber,
-              let data = (dictionary["Representations"] as? [Data])?.first,
-              let image = try? CursorImages.bitmap(data) else { return [] }
-        let hotX = (dictionary["HotSpotX"] as? NSNumber)?.doubleValue ?? 0
-        let hotY = (dictionary["HotSpotY"] as? NSNumber)?.doubleValue ?? 0
-        for count in animatedFrameCounts.sorted() where height.doubleValue / Double(count) >= 1 && height.doubleValue / Double(count) <= 128 {
-            let pointsHigh = height.doubleValue / Double(count)
-            guard image.height % count == 0, hotY < pointsHigh else { continue }
+        return .init(roles: roles.sorted(), appliedRoles: applied.sorted())
+    }
+    /// Direct bitmap matching keeps PNG conversion entirely out of observation.
+    /// Registered animations are vertical filmstrips; validate three frames.
+    public func identify(image: CGImage, width: Double, height: Double, hotX: Double, hotY: Double, frameCount: Int = 1) -> CursorIdentification {
+        if frameCount == 1, height <= 128,
+           let sample = CursorFingerprint(image: image, width: width, height: height, hotX: hotX, hotY: hotY) {
+            let result = identify(sample)
+            if !result.roles.isEmpty { return result }
+        }
+        let counts = frameCount > 1 ? [frameCount] : animatedFrameCounts.sorted()
+        for count in counts where count > 1 && image.height % count == 0 {
+            let pointsHigh = frameCount > 1 ? height : height / Double(count)
+            guard (1...128).contains(pointsHigh), hotY < pointsHigh else { continue }
             let pixelsHigh = image.height / count
-            var candidates: Set<String>?
+            var roles: Set<String>?, applied: Set<String>?
             for index in Set([0, count / 2, count - 1]) {
                 guard let cropped = image.cropping(to: CGRect(x: 0, y: index * pixelsHigh, width: image.width, height: pixelsHigh)),
-                      let png = try? CursorImages.png(cropped) else { candidates = []; break }
-                let frame = CursorClip(frames: [png], width: width.doubleValue, height: pointsHigh, hotX: hotX, hotY: hotY)
-                let found = Set(match(frame))
-                candidates = candidates.map { $0.intersection(found) } ?? found
-                if candidates?.isEmpty == true { break }
+                      let sample = CursorFingerprint(image: cropped, width: width, height: pointsHigh, hotX: hotX, hotY: hotY) else { roles = []; break }
+                let found = identify(sample)
+                roles = roles.map { $0.intersection(found.roles) } ?? Set(found.roles)
+                applied = applied.map { $0.intersection(found.appliedRoles) } ?? Set(found.appliedRoles)
+                if roles?.isEmpty == true { break }
             }
-            if let candidates, !candidates.isEmpty { return candidates.sorted() }
+            if let roles, !roles.isEmpty { return .init(roles: roles.sorted(), appliedRoles: (applied ?? []).sorted()) }
         }
-        return []
+        return .unknown
+    }
+    public func matchCurrent(_ dictionary: [String: Any]) -> [String] {
+        guard let data = (dictionary["Representations"] as? [Data])?.first, let image = try? CursorImages.bitmap(data),
+              let width = dictionary["PointsWide"] as? NSNumber, let height = dictionary["PointsHigh"] as? NSNumber else { return [] }
+        return identify(image: image, width: width.doubleValue, height: height.doubleValue,
+            hotX: (dictionary["HotSpotX"] as? NSNumber)?.doubleValue ?? 0,
+            hotY: (dictionary["HotSpotY"] as? NSNumber)?.doubleValue ?? 0,
+            frameCount: (dictionary["FrameCount"] as? NSNumber)?.intValue ?? 1).roles
     }
     public func match(_ clip: CursorClip) -> [String] {
-        guard let first = clip.frames.first,
-              let sample = CursorFingerprint(data: first, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY) else { return [] }
-        if let exact = entries[sample] { return exact.sorted() }
-        var best = 0.075, matches = Set<String>()
-        for (candidate, ids) in entries {
-            let distance = sample.distance(to: candidate)
-            if distance < best - 0.001 { best = distance; matches = ids }
-            else if distance <= best + 0.001 && distance < 0.075 { matches.formUnion(ids) }
-        }
-        return matches.sorted()
+        guard let first = clip.frames.first, let sample = CursorFingerprint(data: first, width: clip.width,
+            height: clip.height, hotX: clip.hotX, hotY: clip.hotY) else { return [] }
+        return identify(sample).roles
     }
 }

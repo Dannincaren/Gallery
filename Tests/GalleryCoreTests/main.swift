@@ -22,6 +22,11 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("duplicate frame order and frame limit", regression.testDuplicateFrameOrderAndLimit),
+    ("role size, native mode and legacy defaults", regression.testRolePresentationArchiveAndLegacyDefaults),
+    ("mixing a role preserves target aliases and other roles", regression.testMixedRoleTemplatePreservesTargetAndOtherRoles),
+    ("theme directory index and path validation", regression.testThemeDirectoryIndexAndTraversalRejection),
+    ("direct bitmap recognizes native versus applied", regression.testDirectBitmapDistinguishesNativeAndApplied),
     ("global animated filmstrip identification", regression.testGlobalAnimationFilmstripObservation),
     ("theme-only scaling preserves hotspots and source", regression.testSizeScalesGeometryAndLeavesSourceUntouched),
     ("release interrupts press", interaction.testReleaseInterruptsPressAndExpires),

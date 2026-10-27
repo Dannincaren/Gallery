@@ -130,7 +130,9 @@ public enum ThemeFiles {
     }
     public static func exportCape(_ theme: GalleryTheme, to url: URL) throws {
         try theme.validate()
-        let cursors = try Dictionary(uniqueKeysWithValues: theme.roles.map { ($0.id, try CursorImages.capeDictionary($0.clip(.normal)!)) })
+        let selected = theme.roles.filter { !$0.usesNative && !CursorCatalog.assetOnly($0.id) }
+        guard !selected.isEmpty else { throw ThemeError.invalid("没有需要导出的自定义光标。完整设置请保存为 Gallery 主题。") }
+        let cursors = try Dictionary(uniqueKeysWithValues: selected.map { ($0.id, try CursorImages.capeDictionary($0.clip(.normal)!.scaled(by: $0.scale))) })
         let dictionary: [String: Any] = ["CapeName": theme.name, "Author": theme.author,
             "Identifier": "local.gallery.export", "CapeVersion": 1.0, "Version": 2.0,
             "MinimumVersion": 2.0, "HiDPI": true, "Cloud": false, "Cursors": cursors]

@@ -18,6 +18,9 @@ struct ThemeArchive: Codable {
         var id: String
         var name: String
         var splitClickAnimation: Bool
+        var scale: Double?
+        var usesNative: Bool?
+        var sourceThemeName: String?
         var clips: [String: Clip]
     }
     struct Clip: Codable {
@@ -40,7 +43,8 @@ struct ThemeArchive: Codable {
                 }
                 return Clip(frames: keys, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
             }
-            return Role(id: role.id, name: role.name, splitClickAnimation: role.splitClickAnimation, clips: clips)
+            return Role(id: role.id, name: role.name, splitClickAnimation: role.splitClickAnimation,
+                        scale: role.scale, usesNative: role.usesNative, sourceThemeName: role.sourceThemeName, clips: clips)
         }
         images = pool
     }
@@ -55,7 +59,8 @@ struct ThemeArchive: Codable {
                 }
                 return CursorClip(frames: frames, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
             }
-            return CursorRole(id: role.id, name: role.name, clips: clips, splitClickAnimation: role.splitClickAnimation)
+            return CursorRole(id: role.id, name: role.name, clips: clips, splitClickAnimation: role.splitClickAnimation,
+                              scale: role.scale ?? 1, usesNative: role.usesNative ?? false, sourceThemeName: role.sourceThemeName)
         }
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
         theme.idleDelay = idleDelay; theme.idleEnabled = idleEnabled; theme.clickEnabled = clickEnabled

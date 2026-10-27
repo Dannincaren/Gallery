@@ -25,6 +25,8 @@ typedef CGError (*ConnectionPropertyFn)(GLConnection, GLConnection, CFStringRef,
 typedef CGError (*NewConnectionFn)(int, GLConnection *);
 typedef CGError (*WindowTagsFn)(GLConnection, int32_t, const uint64_t *, int);
 typedef CGError (*ClearCoreFn)(GLConnection);
+typedef int32_t (*VisibilityFn)(void);
+typedef void (*DockOverrideFn)(GLConnection, bool);
 static ConnectionFn connectionFn;
 static RegisterFn registerFn;
 static CopyFn copyFn;
@@ -41,6 +43,8 @@ static NewConnectionFn newConnectionFn;
 static GLConnection probeConnection;
 static WindowTagsFn clearWindowTagsFn;
 static ClearCoreFn clearCoreFn;
+static VisibilityFn visibilityFn;
+static DockOverrideFn dockOverrideFn;
 
 static void loadSymbols(void) {
     static dispatch_once_t once;
@@ -62,8 +66,21 @@ static void loadSymbols(void) {
         newConnectionFn = (NewConnectionFn)dlsym(RTLD_DEFAULT, "CGSNewConnection");
         clearWindowTagsFn = (WindowTagsFn)dlsym(RTLD_DEFAULT, "CGSClearWindowTags");
         clearCoreFn = (ClearCoreFn)dlsym(RTLD_DEFAULT, "CoreCursorUnregisterAll");
+        visibilityFn = (VisibilityFn)dlsym(RTLD_DEFAULT, "SLCursorIsVisible");
+        dockOverrideFn = (DockOverrideFn)dlsym(RTLD_DEFAULT, "CGSSetDockCursorOverride");
     });
 }
+
+@interface GLCursorSnapshot ()
+- (instancetype)initWithImage:(CGImageRef)image size:(CGSize)size hotSpot:(CGPoint)hot seed:(int32_t)seed;
+@end
+@implementation GLCursorSnapshot
+- (instancetype)initWithImage:(CGImageRef)image size:(CGSize)size hotSpot:(CGPoint)hot seed:(int32_t)seed {
+    if ((self = [super init])) { _image = CGImageRetain(image); _size = size; _hotSpot = hot; _seed = seed; }
+    return self;
+}
+- (void)dealloc { CGImageRelease(_image); }
+@end
 
 @implementation GLCursorBridge
 + (BOOL)available {
@@ -76,6 +93,8 @@ static void loadSymbols(void) {
             connectionFn != NULL, registerFn != NULL, copyFn != NULL, coreCopyFn != NULL, globalSizeFn && globalDataFn, lastRefreshCode];
 }
 + (int32_t)cursorSeed { loadSymbols(); return seedFn ? seedFn() : -1; }
++ (int32_t)cursorVisibility { loadSymbols(); return visibilityFn ? (visibilityFn() != 0) : -1; }
++ (void)setDockCursorOverride:(BOOL)enabled { loadSymbols(); if (connectionFn && dockOverrideFn) dockOverrideFn(connectionFn(), enabled); }
 + (int32_t)clearCoreCursorCache { loadSymbols(); return connectionFn && clearCoreFn ? clearCoreFn(connectionFn()) : -10001; }
 + (void)prepareOverlayWindow:(NSInteger)windowNumber {
     loadSymbols();
@@ -138,42 +157,42 @@ static void loadSymbols(void) {
         @"PointsWide": @(cursor.image.size.width), @"PointsHigh": @(cursor.image.size.height),
         @"HotSpotX": @(cursor.hotSpot.x), @"HotSpotY": @(cursor.hotSpot.y), @"CoreCursorType": @(coreType)};
 }
-+ (NSDictionary *)currentCursor {
++ (GLCursorSnapshot *)currentSnapshot {
     loadSymbols();
-    // Read the actual WindowServer cursor, independent of this app's active
-    // window or its cached NSCursor. The historical CGSInternal declaration of
-    // this function differs; use the validated rowBytes + CGRect ABI here.
-    if (connectionFn && globalSizeFn && globalDataFn) {
-        // Observe through a separate connection with no background cursor
-        // override. Gallery's drawing/hiding connection can otherwise return
-        // its own cached cursor instead of another app's latest selection.
-        if (!probeConnection && newConnectionFn) { newConnectionFn(0, &probeConnection); }
-        GLConnection observer = probeConnection ? probeConnection : connectionFn();
-        size_t byteCount = 0;
-        if (!globalSizeFn(observer, &byteCount) && byteCount > 0 && byteCount <= 16 * 1024 * 1024) {
-            int length = (int)byteCount;
-            NSMutableData *bytes = [NSMutableData dataWithLength:length];
-            CGRect rect = CGRectZero; CGPoint hot = CGPointZero;
-            int row = 0, depth = 0, components = 0, bits = 0;
-            int error = globalDataFn(observer, bytes.mutableBytes, &length, &row, &rect, &hot, &depth, &components, &bits);
-            if (!error && rect.size.width > 0 && rect.size.width <= 2048 && rect.size.height > 0 && rect.size.height <= 49152 &&
-                bits == 8 && components == 4 && row >= rect.size.width * 4 &&
-                row * rect.size.height <= bytes.length) {
-                CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)bytes);
-                CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
-                CGImageRef image = CGImageCreate(rect.size.width, rect.size.height, 8, 32, row, space,
-                    kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, provider, NULL, false, kCGRenderingIntentDefault);
-                CGColorSpaceRelease(space); CGDataProviderRelease(provider);
-                if (image) {
-                    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:image];
-                    NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-                    CGImageRelease(image);
-                    if (png) return @{@"Representations": @[png], @"FrameCount": @1, @"FrameDuration": @0.1,
-                        @"PointsWide": @(rect.size.width), @"PointsHigh": @(rect.size.height),
-                        @"HotSpotX": @(hot.x), @"HotSpotY": @(hot.y), @"Probe": @"WindowServer"};
-                }
-            }
-        }
+    if (!connectionFn || !globalSizeFn || !globalDataFn) return nil;
+    static dispatch_once_t probeOnce;
+    dispatch_once(&probeOnce, ^{ if (newConnectionFn) newConnectionFn(0, &probeConnection); });
+    GLConnection observer = probeConnection ? probeConnection : connectionFn();
+    int32_t before = seedFn ? seedFn() : -1;
+    size_t byteCount = 0;
+    if (globalSizeFn(observer, &byteCount) || !byteCount || byteCount > 16 * 1024 * 1024) return nil;
+    int length = (int)byteCount;
+    NSMutableData *bytes = [NSMutableData dataWithLength:length];
+    CGRect rect = CGRectZero; CGPoint hot = CGPointZero;
+    int row = 0, depth = 0, components = 0, bits = 0;
+    int error = globalDataFn(observer, bytes.mutableBytes, &length, &row, &rect, &hot, &depth, &components, &bits);
+    if (error || rect.size.width <= 0 || rect.size.width > 2048 || rect.size.height <= 0 || rect.size.height > 49152 ||
+        bits != 8 || components != 4 || row < rect.size.width * 4 || row * rect.size.height > bytes.length) return nil;
+    int32_t after = seedFn ? seedFn() : -1;
+    if (before != after) return nil;
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)bytes);
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGImageRef image = CGImageCreate(rect.size.width, rect.size.height, 8, 32, row, space,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, provider, NULL, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(space); CGDataProviderRelease(provider);
+    if (!image) return nil;
+    GLCursorSnapshot *result = [[GLCursorSnapshot alloc] initWithImage:image size:rect.size hotSpot:hot seed:after];
+    CGImageRelease(image); return result;
+}
++ (NSDictionary *)currentCursor {
+    // PNG conversion is reserved for files and diagnostics. The hot path uses
+    // the retained CGImage snapshot above and performs no PNG encoding.
+    GLCursorSnapshot *snapshot = [self currentSnapshot];
+    if (snapshot) {
+        NSData *png = [[[NSBitmapImageRep alloc] initWithCGImage:snapshot.image] representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if (png) return @{@"Representations": @[png], @"FrameCount": @1, @"FrameDuration": @0.1,
+            @"PointsWide": @(snapshot.size.width), @"PointsHigh": @(snapshot.size.height),
+            @"HotSpotX": @(snapshot.hotSpot.x), @"HotSpotY": @(snapshot.hotSpot.y), @"Probe": @"WindowServer"};
     }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"

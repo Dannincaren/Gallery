@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let store { store.importURL(url) } else { pendingURL = url }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        store?.saveNow()
+        store?.saveNow(wait: true)
         guard store?.runtime.stop() != false else { return .terminateCancel }
         return .terminateNow
     }
@@ -66,7 +66,7 @@ struct GalleryApp: App {
             let store = GalleryStore(preview: true)
             if CommandLine.arguments.count > index + 2,
                let theme = try? ThemeFiles.load(URL(fileURLWithPath: CommandLine.arguments[index + 2])) {
-                store.theme = theme; store.selectedRole = theme.roles[0].id
+                store.setPreviewTheme(theme)
             }
             let host = NSHostingView(rootView: GalleryEditor(store: store).frame(width: 1120, height: 780).environment(\.colorScheme, .light))
             host.frame = NSRect(x: 0, y: 0, width: 1120, height: 780)
@@ -108,7 +108,7 @@ private struct MenuContents: View {
         Text(runtime.status)
         Button("打开 Gallery") { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true) }
         Button(runtime.enabled ? "停用并恢复光标" : "应用当前主题") {
-            if runtime.enabled { runtime.stop() } else { runtime.start(store.theme) }
+            if runtime.enabled { runtime.stop() } else { store.applyCurrentTheme() }
         }
         if runtime.hasRecovery && !runtime.enabled { Button("恢复上次光标") { runtime.recover() } }
         Divider()

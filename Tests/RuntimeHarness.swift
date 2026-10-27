@@ -1,4 +1,5 @@
-import AppKit
+@preconcurrency import AppKit
+import Darwin
 import GalleryCore
 import GalleryNative
 
@@ -55,6 +56,7 @@ struct RuntimeHarness {
             process.arguments = ["--fixture", command.path]; try process.run(); fixtureProcess = process; pump(0.5)
             var theme = try ThemeFiles.load(URL(fileURLWithPath: args[2]))
             theme.idleDelay = 1.2
+            if ProcessInfo.processInfo.environment["GALLERY_PERF_CHECK"] == "1" { theme.idleEnabled = false }
             try "resize".write(to: command, atomically: true, encoding: .utf8); pump(0.25)
             if let snapshot = GLCursorBridge.currentCursor(), let clip = try? CursorImages.fromCape(snapshot) {
                 print("PRECHECK global", clip.width, clip.height, clip.hotX, clip.hotY)
@@ -98,6 +100,27 @@ struct RuntimeHarness {
             print("BACKGROUND normal:", runtime.status)
             print("FRONTMOST", NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1, "fixture", process.processIdentifier)
             try verify(runtime.status.contains("正常选择"), "后台箭头识别失败")
+            if ProcessInfo.processInfo.environment["GALLERY_PERF_CHECK"] == "1" {
+                func cpuTime() -> Double { var u = rusage(); getrusage(RUSAGE_SELF, &u); return Double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + Double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1_000_000 }
+                var cpu = cpuTime(), start = ProcessInfo.processInfo.systemUptime
+                pump(6)
+                print("PERF stationary CPU percent", (cpuTime() - cpu) / (ProcessInfo.processInfo.systemUptime - start) * 100)
+                cpu = cpuTime(); start = ProcessInfo.processInfo.systemUptime
+                for i in 0..<45 { try ["arrow", "text", "resize"][i % 3].write(to: command, atomically: true, encoding: .utf8); pump(0.04) }
+                print("PERF changing CPU percent", (cpuTime() - cpu) / (ProcessInfo.processInfo.systemUptime - start) * 100)
+                try "arrow".write(to: command, atomically: true, encoding: .utf8); pump(0.4)
+                var latency: [Double] = []
+                for _ in 0..<30 {
+                    runtime.testPhysicalDown = true; start = ProcessInfo.processInfo.systemUptime; runtime.injectObserved(.leftMouseDown)
+                    latency.append((ProcessInfo.processInfo.systemUptime - start) * 1000)
+                    runtime.testPhysicalDown = false; runtime.injectObserved(.leftMouseUp); pump(0.01)
+                }
+                latency.sort(); print("PERF click handler p95 ms", latency[Int(Double(latency.count - 1) * 0.95)])
+                start = ProcessInfo.processInfo.systemUptime
+                for scale in [0.8, 1.0, 1.2, 1.5, 1.0] { runtime.setScale(scale) }
+                print("PERF five size updates ms", (ProcessInfo.processInfo.systemUptime - start) * 1000)
+                try verify(runtime.stop(), "恢复失败"); print("PERF complete"); return
+            }
             runtime.testPhysicalDown = true; runtime.injectObserved(.leftMouseDown)
             print("IMMEDIATE DOWN", runtime.status, runtime.enabled, runtime.error ?? "")
             let press = theme.roles.first { $0.id == "com.apple.coregraphics.Arrow" }!.clip(.press)!
@@ -139,8 +162,50 @@ struct RuntimeHarness {
             try verify(runtime.overlaySize == CGSize(width: 48, height: 48), "大小滑块未缩放实际显示层")
             print("BACKGROUND scaling and custom cursor size: PASS")
             print("BACKGROUND known → unknown → known: PASS")
+            runtime.setRoleScale(1.25, for: "com.apple.coregraphics.Arrow"); pump(0.03)
+            try verify(runtime.overlaySize == CGSize(width: 60, height: 60), "角色大小未叠加全局大小")
+            runtime.setRoleScale(1, for: "com.apple.coregraphics.Arrow")
+            print("BACKGROUND per-role size: PASS")
+            for i in 0..<24 {
+                let commands = ["arrow", "text", "resize"], titles = ["正常选择", "文本选择", "水平调整"]
+                try commands[i % 3].write(to: command, atomically: true, encoding: .utf8); pump(0.045)
+                try verify(runtime.status.contains(titles[i % 3]), "快速切换未跟随角色：\(runtime.status)")
+            }
+            try "arrow".write(to: command, atomically: true, encoding: .utf8); pump(0.1)
+            if let screen = NSScreen.screens.first {
+                for i in 0..<18 {
+                    CGWarpMouseCursorPosition(CGPoint(x: 275 + Double(i * 12), y: screen.frame.maxY - 275)); pump(0.022)
+                    guard let shown = runtime.overlayPointerPosition else { throw ThemeError.invalid("移动时图层消失") }
+                    let actual = NSEvent.mouseLocation
+                    try verify(abs(shown.x - actual.x) <= 1 && abs(shown.y - actual.y) <= 1, "显示层未跟随鼠标热点")
+                }
+            }
+            print("BACKGROUND rapid role changes and pointer following: PASS")
+            if ProcessInfo.processInfo.environment["GALLERY_DOCK_CHECK"] == "1", let screen = NSScreen.screens.first {
+                let oldPoint = CGEvent(source: nil)?.location
+                let frame = screen.frame, visible = screen.visibleFrame
+                let point: CGPoint
+                if visible.minX > frame.minX + 20 { point = CGPoint(x: frame.minX + 5, y: frame.midY) }
+                else if visible.maxX < frame.maxX - 20 { point = CGPoint(x: frame.maxX - 5, y: frame.midY) }
+                else { point = CGPoint(x: frame.midX, y: frame.minY + 5) }
+                CGWarpMouseCursorPosition(CGPoint(x: point.x, y: frame.maxY - point.y)); pump(0.8)
+                for _ in 0..<15 {
+                    try verify(!(runtime.overlayVisible && GLCursorBridge.cursorVisibility() == 1), "Dock 中出现双光标")
+                    pump(0.02)
+                }
+                print("DOCK overlay", runtime.overlayVisible, "native visibility", GLCursorBridge.cursorVisibility(), "repairs", runtime.overlayHideRepairs)
+                if let oldPoint { CGWarpMouseCursorPosition(oldPoint) }; pump(0.1)
+            }
             try verify(runtime.stop(), "恢复失败")
             print("BACKGROUND restore: PASS")
+            for index in theme.roles.indices where CursorCatalog.isArrow(theme.roles[index].id) { theme.roles[index].usesNative = true }
+            runtime.start(theme)
+            try "unknown".write(to: command, atomically: true, encoding: .utf8); pump(0.15)
+            try "arrow".write(to: command, atomically: true, encoding: .utf8); pump(0.3)
+            try verify(runtime.status.contains("系统原有"), "原生角色设置没有生效")
+            try verify(!runtime.overlayVisible, "原生角色仍显示主题图层")
+            try verify(runtime.stop(), "原生模式恢复失败")
+            print("BACKGROUND native role opt-out: PASS")
         } catch {
             print("FAIL:", error.localizedDescription)
             _ = runtime.stop(); fixtureProcess?.terminate()
@@ -179,6 +244,7 @@ struct RuntimeHarness {
         let text = NSTextField(labelWithString: "正在验证后台光标与恢复，请稍候…")
         text.frame = NSRect(x: 22, y: 40, width: 320, height: 25); window.contentView?.addSubview(text)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
         // Cursor ownership follows the window under the pointer, not just the
         // keyboard-focused app. Warp into our own fixture without posting any
         // input events; the controller restores the previous pointer location.

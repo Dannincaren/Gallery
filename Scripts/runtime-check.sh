@@ -8,7 +8,7 @@ bin_path="$(swift build --disable-sandbox -c release --show-bin-path)"
 mkdir -p .build/runtime-check
 swiftc -O -swift-version 5 -D GALLERY_RUNTIME_CHECKS -parse-as-library \
     -I "$bin_path/Modules" -I "$bin_path/GalleryNative.build" \
-    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/CursorOverlay.swift Tests/RuntimeHarness.swift \
+    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/CursorOverlay.swift Sources/GalleryApp/CursorRecognition.swift Sources/GalleryApp/PreparedCursor.swift Tests/RuntimeHarness.swift \
     "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build/CursorBridge.m.o" \
     -framework AppKit -framework ApplicationServices -o .build/runtime-check/GalleryRuntimeChecks
 .build/runtime-check/GalleryRuntimeChecks "$1" "$2"
