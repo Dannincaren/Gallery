@@ -13,6 +13,8 @@ final class CursorRuntime: ObservableObject {
     private var originals: [String: [String: Any]] = [:]
     private var normal: [String: [String: Any]] = [:]
     private var matcher = CursorMatcher()
+    private var appliedMatcher = CursorMatcher()
+    private var needsNormalOverlay = false
     private var roleID: String?
     private var roleAliases: [String] = []
     private var machine = InteractionMachine(now: ProcessInfo.processInfo.systemUptime)
@@ -29,6 +31,22 @@ final class CursorRuntime: ObservableObject {
     private var lastProbe = 0.0
     private var lastSeed: Int32 = -1
     private var unknownTicks = 0
+    private var pointerScale = 1.0
+    func setScale(_ value: Double) {
+        guard value.isFinite else { return }
+        pointerScale = min(3, max(0.5, value))
+        guard enabled, let theme else { return }
+        do {
+            for role in theme.roles where originals[role.id] != nil {
+                let clip = role.clip(.normal)!.scaled(by: pointerScale)
+                let dictionary = try CursorImages.capeDictionary(clip)
+                try register(dictionary, id: role.id, refresh: false); normal[role.id] = dictionary
+                matcher.add(clip, role: role.id)
+                appliedMatcher.add(clip, role: role.id)
+            }
+            render()
+        } catch { fail(error) }
+    }
     private var recoveryOverride: URL?
     init(recoveryURL: URL? = nil) { recoveryOverride = recoveryURL }
     #if GALLERY_RUNTIME_CHECKS
@@ -36,6 +54,7 @@ final class CursorRuntime: ObservableObject {
     func injectObserved(_ type: CGEventType) { handle(type) }
     var renderedFrame: Data? { overlay.displayedFrame }
     var overlayVisible: Bool { overlay.visible }
+    var overlaySize: CGSize { overlay.size }
     #endif
     private var journalURL: URL {
         if let recoveryOverride { return recoveryOverride }
@@ -55,6 +74,10 @@ final class CursorRuntime: ObservableObject {
            var arrow = theme.roles.first(where: { $0.id == "com.apple.coregraphics.Arrow" }) {
             arrow.id = "com.apple.cursor.0"; theme.roles.append(arrow)
         }
+        if !theme.roles.contains(where: { $0.id == "com.apple.cursor.1" }),
+           var text = theme.roles.first(where: { $0.id == "com.apple.coregraphics.IBeam" }) {
+            text.id = "com.apple.cursor.1"; theme.roles.append(text)
+        }
         do {
             try theme.validate()
             guard GLCursorBridge.available() else { throw ThemeError.invalid("此系统未提供所需光标接口。编辑器仍可使用。") }
@@ -62,15 +85,19 @@ final class CursorRuntime: ObservableObject {
             let initialCursor = GLCursorBridge.currentCursor().flatMap { try? CursorImages.fromCape($0) }
             var backup: [String: [String: Any]] = [:], base: [String: [String: Any]] = [:]
             matcher = CursorMatcher()
+            appliedMatcher = CursorMatcher()
             for role in theme.roles where !CursorCatalog.assetOnly(role.id) {
                 guard let old = GLCursorBridge.readCursor(role.id),
                       let restored = try? CursorImages.fromCape(old), restored.frames.count <= 24 else { continue }
                 backup[role.id] = old
-                base[role.id] = try CursorImages.capeDictionary(role.clip(.normal)!)
+                base[role.id] = try CursorImages.capeDictionary(role.clip(.normal)!.scaled(by: pointerScale))
                 matcher.add(restored, role: role.id)
+                matcher.addRepresentations(old, role: role.id)
                 matcher.add(role.clip(.normal)!, role: role.id)
-                if let standard = GLCursorBridge.standardCursor(role.id), let clip = try? CursorImages.fromCape(standard) {
-                    matcher.add(clip, role: role.id)
+                matcher.add(role.clip(.normal)!.scaled(by: pointerScale), role: role.id)
+                appliedMatcher.add(role.clip(.normal)!.scaled(by: pointerScale), role: role.id)
+                if let standard = GLCursorBridge.standardCursor(role.id) {
+                    matcher.addRepresentations(standard, role: role.id)
                 }
             }
             guard !backup.isEmpty else { throw ThemeError.invalid("未能备份任何对应系统光标，未进行替换。") }
@@ -152,9 +179,10 @@ final class CursorRuntime: ObservableObject {
         let seed = GLCursorBridge.cursorSeed()
         guard force || now - lastProbe > 0.12 || seed != lastSeed else { return }
         lastProbe = now; lastSeed = seed
-        guard let data = GLCursorBridge.currentCursor(), let clip = try? CursorImages.fromCape(data) else { return }
+        guard let data = GLCursorBridge.currentCursor() else { return }
         lastSeed = GLCursorBridge.cursorSeed()
-        let found = matcher.match(clip).filter { normal[$0] != nil }
+        let found = matcher.matchCurrent(data).filter { normal[$0] != nil }
+        needsNormalOverlay = appliedMatcher.matchCurrent(data).isEmpty
         if found.isEmpty { unknownTicks += 1 } else { unknownTicks = 0 }
         guard !found.isEmpty || unknownTicks >= 2 else { return }
         guard Set(found) != Set(roleAliases) else { return }
@@ -203,8 +231,8 @@ final class CursorRuntime: ObservableObject {
         let motion = role.clip(machine.motion) == nil ? .normal : machine.motion
         guard let clip = role.clip(motion) else { return }
         do {
-            if motion == .normal { try overlay.hide() }
-            else { try overlay.show(clip, key: role.id + ":" + motion.rawValue, loops: motion.loops, now: now) }
+            if motion == .normal && !needsNormalOverlay { try overlay.hide() }
+            else { try overlay.show(clip.scaled(by: pointerScale), key: role.id + ":" + motion.rawValue, loops: motion.loops, now: now) }
             let text = "\(role.name) · \(motion.title) · 后台运行中"
             if status != text { status = text }
         } catch { fail(error) }

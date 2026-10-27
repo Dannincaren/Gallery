@@ -86,7 +86,7 @@ struct GalleryApp: App {
     }
     var body: some Scene {
         Window("Gallery", id: "editor") {
-            GalleryEditor(store: store).onAppear { delegate.store = store }
+            GalleryEditor(store: store).onAppear { delegate.store = store; store.handleLaunch() }
         }.defaultSize(width: 1120, height: 780)
             .commands {
                 CommandGroup(replacing: .newItem) {

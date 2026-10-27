@@ -21,6 +21,7 @@ final class CursorOverlay {
     private var started = 0.0
     private(set) var displayedFrame: Data?
     var visible: Bool { panel.isVisible && hidden }
+    var size: CGSize { panel.frame.size }
     init() {
         panel = CursorPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
@@ -46,6 +47,10 @@ final class CursorOverlay {
                 throw ThemeError.invalid("无法隐藏系统指针。")
             }
             hidden = true
+            // The override is only needed for the hide request. Leaving it
+            // enabled can keep Gallery's cached cursor above another app's
+            // standard CoreCursor changes.
+            _ = GLCursorBridge.setBackgroundCursorUpdates(false)
         }
         if displayedFrame != data { imageView.image = image; displayedFrame = data }
         let position = NSEvent.mouseLocation

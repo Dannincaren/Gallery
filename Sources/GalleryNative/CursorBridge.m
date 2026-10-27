@@ -16,7 +16,7 @@ typedef CGError (*CopyFn)(GLConnection, const char *, CGSize *, CGPoint *,
                          NSUInteger *, CGFloat *, CFArrayRef *);
 typedef CGError (*CoreCopyFn)(GLConnection, int, CFArrayRef *, CGSize *, CGPoint *,
                              NSUInteger *, CGFloat *);
-typedef CGError (*GlobalSizeFn)(GLConnection, int *);
+typedef CGError (*GlobalSizeFn)(GLConnection, size_t *);
 typedef CGError (*GlobalDataFn)(GLConnection, void *, int *, int *, CGRect *, CGPoint *, int *, int *, int *);
 typedef int (*SeedFn)(void);
 typedef CGError (*SelectFn)(GLConnection, const char *, int *);
@@ -98,9 +98,11 @@ static void loadSymbols(void) {
     return error;
 }
 + (NSDictionary *)standardCursor:(NSString *)identifier {
+    loadSymbols();
     NSDictionary *selectors = @{
         @"com.apple.coregraphics.Arrow": @"arrowCursor", @"com.apple.cursor.0": @"arrowCursor", @"com.apple.coregraphics.IBeam": @"IBeamCursor",
         @"com.apple.coregraphics.IBeamXOR": @"IBeamCursor", @"com.apple.cursor.2": @"pointingHandCursor",
+        @"com.apple.cursor.1": @"IBeamCursor",
         @"com.apple.cursor.13": @"pointingHandCursor", @"com.apple.cursor.3": @"operationNotAllowedCursor",
         @"com.apple.cursor.7": @"crosshairCursor", @"com.apple.cursor.8": @"crosshairCursor",
         @"com.apple.cursor.11": @"closedHandCursor", @"com.apple.cursor.12": @"openHandCursor",
@@ -113,16 +115,26 @@ static void loadSymbols(void) {
     SEL selector = NSSelectorFromString(name);
     if (![NSCursor respondsToSelector:selector]) return nil;
     NSCursor *cursor = ((NSCursor *(*)(id, SEL))objc_msgSend)([NSCursor class], selector);
+    SEL initialize = NSSelectorFromString(@"_getImageAndHotSpotFromCoreCursor");
+    if ([cursor respondsToSelector:initialize]) ((void (*)(id, SEL))objc_msgSend)(cursor, initialize);
+    NSMutableArray<NSData *> *representations = [NSMutableArray array];
+    for (NSImageRep *rep in cursor.image.representations) {
+        if ([rep isKindOfClass:NSBitmapImageRep.class]) {
+            NSData *png = [(NSBitmapImageRep *)rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+            if (png) [representations addObject:png];
+        }
+    }
     CGImageRef image = [cursor.image CGImageForProposedRect:NULL context:nil hints:nil];
     NSBitmapImageRep *fallback = nil;
     if (!image) { fallback = [NSBitmapImageRep imageRepWithData:cursor.image.TIFFRepresentation]; image = fallback.CGImage; }
     if (!image) return nil;
     NSData *png = [[[NSBitmapImageRep alloc] initWithCGImage:image] representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-    if (!png) return nil;
+    if (png) [representations addObject:png];
+    if (!representations.count) return nil;
     long long coreType = -1;
     SEL typeSelector = NSSelectorFromString(@"_coreCursorType");
     if ([cursor respondsToSelector:typeSelector]) coreType = ((long long (*)(id, SEL))objc_msgSend)(cursor, typeSelector);
-    return @{@"Representations": @[png], @"FrameCount": @1, @"FrameDuration": @0.1,
+    return @{@"Representations": representations, @"FrameCount": @1, @"FrameDuration": @0.1,
         @"PointsWide": @(cursor.image.size.width), @"PointsHigh": @(cursor.image.size.height),
         @"HotSpotX": @(cursor.hotSpot.x), @"HotSpotY": @(cursor.hotSpot.y), @"CoreCursorType": @(coreType)};
 }
@@ -137,13 +149,14 @@ static void loadSymbols(void) {
         // its own cached cursor instead of another app's latest selection.
         if (!probeConnection && newConnectionFn) { newConnectionFn(0, &probeConnection); }
         GLConnection observer = probeConnection ? probeConnection : connectionFn();
-        int length = 0;
-        if (!globalSizeFn(observer, &length) && length > 0 && length <= 16 * 1024 * 1024) {
+        size_t byteCount = 0;
+        if (!globalSizeFn(observer, &byteCount) && byteCount > 0 && byteCount <= 16 * 1024 * 1024) {
+            int length = (int)byteCount;
             NSMutableData *bytes = [NSMutableData dataWithLength:length];
             CGRect rect = CGRectZero; CGPoint hot = CGPointZero;
             int row = 0, depth = 0, components = 0, bits = 0;
             int error = globalDataFn(observer, bytes.mutableBytes, &length, &row, &rect, &hot, &depth, &components, &bits);
-            if (!error && rect.size.width > 0 && rect.size.width <= 2048 && rect.size.height > 0 && rect.size.height <= 2048 &&
+            if (!error && rect.size.width > 0 && rect.size.width <= 2048 && rect.size.height > 0 && rect.size.height <= 49152 &&
                 bits == 8 && components == 4 && row >= rect.size.width * 4 &&
                 row * rect.size.height <= bytes.length) {
                 CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)bytes);
@@ -224,7 +237,7 @@ static void loadSymbols(void) {
     int seed = 0;
     BOOL suppressVisibleUpdate = backgroundUpdatesEnabled && !refresh;
     if (suppressVisibleUpdate) [self setBackgroundCursorUpdates:NO];
-    CGError error = registerFn(connectionFn(), identifier.UTF8String, true, refresh, size, hot,
+    CGError error = registerFn(connectionFn(), identifier.UTF8String, true, true, size, hot,
                               count, duration, (__bridge CFArrayRef)images, &seed);
     if (suppressVisibleUpdate) [self setBackgroundCursorUpdates:YES];
     if (!error && refresh) {

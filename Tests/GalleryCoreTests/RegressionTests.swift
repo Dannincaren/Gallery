@@ -3,6 +3,26 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testGlobalAnimationFilmstripObservation() throws {
+        let helper = ImportTests()
+        let clip = CursorClip(frames: try [NSColor.red, .blue, .green].map { try helper.frame($0) }, hotX: 4, hotY: 4)
+        let registered = try CursorImages.capeDictionary(clip)
+        var global = registered
+        global["FrameCount"] = 1; global["PointsHigh"] = clip.height * 3
+        var matcher = CursorMatcher(); matcher.add(clip, role: "animated")
+        expectEqual(matcher.matchCurrent(global), ["animated"])
+        var wrong = global; wrong["HotSpotX"] = clip.width * 0.9
+        expectEqual(matcher.matchCurrent(wrong), [])
+    }
+    func testSizeScalesGeometryAndLeavesSourceUntouched() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)], width: 32, height: 24, hotX: 5, hotY: 7)
+        let large = clip.scaled(by: 2)
+        expectEqual(large.width, 64); expectEqual(large.height, 48)
+        expectEqual(large.hotX, 10); expectEqual(large.hotY, 14)
+        expectEqual(large.frames, clip.frames); expectEqual(clip.width, 32)
+        try large.validate(); try clip.scaled(by: 100).validate()
+        expectEqual(clip.scaled(by: .nan), clip)
+    }
     func testUnsplitClickAutomaticallyPlaysRelease() {
         var m = InteractionMachine(now: 0)
         m.down(now: 1, pressDuration: 0.1, enabled: true, split: false, releaseDuration: 0.2)

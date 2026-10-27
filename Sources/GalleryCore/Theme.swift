@@ -46,6 +46,16 @@ public struct CursorClip: Codable, Equatable {
         result.frameDuration = duration / Double(limit)
         return result
     }
+    /// Scale logical geometry and hotspot together, without changing the
+    /// system-wide accessibility pointer size or another app's custom cursor.
+    public func scaled(by scale: Double) -> CursorClip {
+        guard scale.isFinite, scale > 0 else { return self }
+        let factor = max(1 / min(width, height), min(scale, 128 / max(width, height)))
+        var result = self
+        result.width = width * factor; result.height = height * factor
+        result.hotX = hotX * factor; result.hotY = hotY * factor
+        return result
+    }
 }
 
 public struct CursorRole: Codable, Equatable, Identifiable {

@@ -12,6 +12,13 @@ final class GalleryStore: ObservableObject {
     @Published private(set) var importing = false
     @Published private(set) var saveStatus = "已保存在本机"
     let runtime = CursorRuntime()
+    let preferences = AppPreferences()
+    private var handledLaunch = false
+    func handleLaunch() {
+        guard !handledLaunch else { return }; handledLaunch = true
+        runtime.setScale(preferences.pointerScale)
+        if preferences.applyAtLaunch && !runtime.hasRecovery { runtime.start(theme) }
+    }
     private var pendingSave: DispatchWorkItem?
     private var projectURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

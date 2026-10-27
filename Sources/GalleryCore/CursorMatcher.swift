@@ -50,13 +50,54 @@ public struct CursorFingerprint: Hashable {
 
 public struct CursorMatcher {
     private var entries: [CursorFingerprint: Set<String>] = [:]
+    private var animatedFrameCounts = Set<Int>()
     public init() {}
+    public mutating func addRepresentations(_ dictionary: [String: Any], role: String) {
+        for data in dictionary["Representations"] as? [Data] ?? [] {
+            var one = dictionary; one["Representations"] = [data]
+            if let clip = try? CursorImages.fromCape(one) { add(clip, role: role) }
+        }
+    }
     public mutating func add(_ clip: CursorClip, role: String) {
+        if clip.frames.count > 1 { animatedFrameCounts.insert(clip.sampled().frames.count) }
         for frame in clip.sampled().frames {
             if let sample = CursorFingerprint(data: frame, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY) {
                 entries[sample, default: []].insert(role)
             }
         }
+    }
+    /// WindowServer returns a complete vertical filmstrip for an animated
+    /// registered cursor, but its global-data API omits the frame count.
+    /// Only try counts present in our registered resources, and require the
+    /// first, middle and last frames to agree on the role.
+    public func matchCurrent(_ dictionary: [String: Any]) -> [String] {
+        if let height = dictionary["PointsHigh"] as? NSNumber, height.doubleValue <= 128,
+           let clip = try? CursorImages.fromCape(dictionary) {
+            let result = match(clip)
+            if !result.isEmpty { return result }
+        }
+        guard let height = dictionary["PointsHigh"] as? NSNumber,
+              let width = dictionary["PointsWide"] as? NSNumber,
+              let data = (dictionary["Representations"] as? [Data])?.first,
+              let image = try? CursorImages.bitmap(data) else { return [] }
+        let hotX = (dictionary["HotSpotX"] as? NSNumber)?.doubleValue ?? 0
+        let hotY = (dictionary["HotSpotY"] as? NSNumber)?.doubleValue ?? 0
+        for count in animatedFrameCounts.sorted() where height.doubleValue / Double(count) >= 1 && height.doubleValue / Double(count) <= 128 {
+            let pointsHigh = height.doubleValue / Double(count)
+            guard image.height % count == 0, hotY < pointsHigh else { continue }
+            let pixelsHigh = image.height / count
+            var candidates: Set<String>?
+            for index in Set([0, count / 2, count - 1]) {
+                guard let cropped = image.cropping(to: CGRect(x: 0, y: index * pixelsHigh, width: image.width, height: pixelsHigh)),
+                      let png = try? CursorImages.png(cropped) else { candidates = []; break }
+                let frame = CursorClip(frames: [png], width: width.doubleValue, height: pointsHigh, hotX: hotX, hotY: hotY)
+                let found = Set(match(frame))
+                candidates = candidates.map { $0.intersection(found) } ?? found
+                if candidates?.isEmpty == true { break }
+            }
+            if let candidates, !candidates.isEmpty { return candidates.sorted() }
+        }
+        return []
     }
     public func match(_ clip: CursorClip) -> [String] {
         guard let first = clip.frames.first,

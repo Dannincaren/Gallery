@@ -4,17 +4,18 @@ import GalleryCore
 struct GalleryEditor: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
+    @ObservedObject var preferences: AppPreferences
     @State private var playing = true
     @State private var selectedFrame = 0
     @State private var previewStart = Date()
     @State private var showSettings = false
     @State private var showImport = false
-    init(store: GalleryStore) { self.store = store; self.runtime = store.runtime }
+    init(store: GalleryStore) { self.store = store; self.runtime = store.runtime; self.preferences = store.preferences }
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
-                    Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.blue)
+                    Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.primary)
                     VStack(alignment: .leading) {
                         Text("Gallery").font(.title2.bold())
                         Text("让指针有自己的节奏").font(.caption).foregroundStyle(.secondary)
@@ -57,6 +58,14 @@ struct GalleryEditor: View {
                             Button("导入主题…") { showImport = true }
                             if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
                         }
+                        HStack(spacing: 12) {
+                            Image(systemName: "cursorarrow"); Text("指针大小")
+                            Slider(value: $preferences.pointerScale, in: 0.5...3).frame(maxWidth: 300)
+                            Text("\(Int((preferences.pointerScale * 100).rounded()))%")
+                                .monospacedDigit().frame(width: 48)
+                            Button("还原") { preferences.pointerScale = 1 }
+                            Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
+                        }
                         if store.importing {
                             HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
                         }
@@ -90,7 +99,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.2 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.3 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
@@ -122,6 +131,7 @@ struct GalleryEditor: View {
         } message: { Text(runtime.error ?? store.message ?? "") }
         .onChange(of: store.selectedRole) { _, _ in selectedFrame = 0; previewStart = Date() }
         .onChange(of: store.selectedMotion) { _, _ in selectedFrame = 0; previewStart = Date() }
+        .onReceive(preferences.$pointerScale.debounce(for: .milliseconds(180), scheduler: DispatchQueue.main)) { runtime.setScale($0) }
         .frame(minWidth: 960, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -295,10 +305,28 @@ private struct HotspotPreview: View {
 private struct InteractionSettings: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
+    @ObservedObject var preferences: AppPreferences
+    init(store: GalleryStore, runtime: CursorRuntime) {
+        self.store = store; self.runtime = runtime; self.preferences = store.preferences
+    }
     @Environment(\.dismiss) var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("交互与应用").font(.title2.bold())
+            GroupBox("启动") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("开机自启动（登录后运行）", isOn: Binding(get: { preferences.launchAtLogin || preferences.needsApproval }, set: { preferences.setLaunchAtLogin($0) }))
+                    if preferences.needsApproval {
+                        HStack {
+                            Text("请在系统登录项中允许 Gallery。")
+                            Button("打开登录项设置") { preferences.openLoginSettings() }
+                        }.font(.caption)
+                    }
+                    Toggle("启动后自动应用当前主题", isOn: $preferences.applyAtLaunch)
+                    Text("请将应用放入「应用程序」后开启。存在待恢复记录时不会自动应用。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+            }
             Form {
                 Section("交互动画") {
                     Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)
@@ -331,7 +359,12 @@ private struct InteractionSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(runtime.diagnostics).font(.caption2.monospaced()).foregroundStyle(.tertiary).textSelection(.enabled)
             HStack { Spacer(); Button("完成") { store.changed(); dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 570, height: 650)
+        }.padding(24).frame(width: 590, height: 790)
+        .onAppear { preferences.refreshLoginStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in preferences.refreshLoginStatus() }
+        .alert("启动设置", isPresented: Binding(get: { preferences.error != nil }, set: { if !$0 { preferences.error = nil } })) {
+            Button("好") { preferences.error = nil }
+        } message: { Text(preferences.error ?? "") }
         .onChange(of: store.theme.idleDelay) { _, _ in store.changed() }
         .onChange(of: store.theme.idleEnabled) { _, _ in store.changed() }
         .onChange(of: store.theme.clickEnabled) { _, _ in store.changed() }

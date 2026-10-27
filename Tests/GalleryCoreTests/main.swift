@@ -22,6 +22,8 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("global animated filmstrip identification", regression.testGlobalAnimationFilmstripObservation),
+    ("theme-only scaling preserves hotspots and source", regression.testSizeScalesGeometryAndLeavesSourceUntouched),
     ("release interrupts press", interaction.testReleaseInterruptsPressAndExpires),
     ("new click replaces pending release", interaction.testNewClickReplacesOldReleaseDeadline),
     ("activity cancels idle and held button blocks idle", interaction.testIdleIsCancelledByActivityAndNeverStartsWhileHeld),
