@@ -52,23 +52,29 @@ public enum CursorImages {
         try original.validate()
         let clip = original.sampled()
         let images = try clip.frames.map { try bitmap($0) }
-        let width = images.map(\.width).max()!
-        let height = images.map(\.height).max()!
-        guard width <= 2048, height <= 2048,
-              let context = CGContext(data: nil, width: width, height: height * images.count,
-                                      bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            throw ThemeError.invalid("动画条带过大。请缩小图像。")
+        // WindowServer selects representations by display scale, not merely by
+        // their order or arbitrary source resolution. A lone 96px image with a
+        // 32pt size could register successfully yet leave other apps on a cached
+        // cursor. Always publish real 1x, 2x and 3x filmstrips, as Mousecape does.
+        let representations = try [1.0, 2.0, 3.0].map { scale -> Data in
+            let width = max(1, Int((clip.width * scale).rounded()))
+            let height = max(1, Int((clip.height * scale).rounded()))
+            guard let context = CGContext(data: nil, width: width, height: height * images.count,
+                bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw ThemeError.invalid("无法创建动画条带。")
+            }
+            context.interpolationQuality = .high
+            for (index, image) in images.enumerated() {
+                context.draw(image, in: CGRect(x: 0, y: (images.count - index - 1) * height, width: width, height: height))
+            }
+            guard let strip = context.makeImage() else { throw ThemeError.invalid("无法创建动画条带。") }
+            return try png(strip)
         }
-        // Quartz is bottom-up; a cape's first frame is the topmost tile.
-        for (index, image) in images.enumerated() {
-            context.draw(image, in: CGRect(x: 0, y: (images.count - index - 1) * height, width: width, height: height))
-        }
-        guard let strip = context.makeImage() else { throw ThemeError.invalid("无法创建动画条带。") }
         return ["FrameCount": images.count, "FrameDuration": clip.frameDuration,
                 "PointsWide": clip.width, "PointsHigh": clip.height,
-                "HotSpotX": clip.hotX, "HotSpotY": clip.hotY, "Representations": [try png(strip)]]
+                "HotSpotX": clip.hotX, "HotSpotY": clip.hotY, "Representations": representations]
     }
     /// Match the bitmap AND hotspot. No semantic guessing from a position, AX
     /// role or foreground app; unknown/custom application cursors are skipped.
@@ -105,16 +111,22 @@ public enum ThemeFiles {
             }
             theme = GalleryTheme(name: p["CapeName"] as? String ?? url.deletingPathExtension().lastPathComponent,
                                  author: p["Author"] as? String ?? "", roles: roles)
-        } else { theme = try JSONDecoder().decode(GalleryTheme.self, from: data) }
+        } else {
+            struct Header: Decodable { var formatVersion: Int }
+            if try JSONDecoder().decode(Header.self, from: data).formatVersion == 2 {
+                theme = try JSONDecoder().decode(ThemeArchive.self, from: data).theme()
+            } else { theme = try JSONDecoder().decode(GalleryTheme.self, from: data) }
+        }
         try theme.validate()
         // Validate image data at the import boundary, before a native call.
-        for role in theme.roles { for clip in role.clips.values { for frame in clip.frames { _ = try CursorImages.bitmap(frame) } } }
+        var checked = Set<Data>()
+        for role in theme.roles { for clip in role.clips.values { for frame in clip.frames where checked.insert(frame).inserted { _ = try CursorImages.bitmap(frame) } } }
         return theme
     }
     public static func save(_ theme: GalleryTheme, to url: URL) throws {
         try theme.validate()
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(theme).write(to: url, options: .atomic)
+        try encoder.encode(ThemeArchive(theme)).write(to: url, options: .atomic)
     }
     public static func exportCape(_ theme: GalleryTheme, to url: URL) throws {
         try theme.validate()
@@ -125,10 +137,6 @@ public enum ThemeFiles {
         try PropertyListSerialization.data(fromPropertyList: dictionary, format: .xml, options: 0).write(to: url, options: .atomic)
     }
     public static func roleName(_ id: String) -> String {
-        let names = ["com.apple.coregraphics.Arrow": "箭头", "com.apple.coregraphics.IBeam": "文本",
-                     "com.apple.coregraphics.IBeamXOR": "文本反色", "com.apple.coregraphics.Wait": "忙碌",
-                     "com.apple.cursor.2": "链接", "com.apple.cursor.13": "指向手势", "com.apple.cursor.11": "抓取",
-                     "com.apple.cursor.12": "张开手掌", "com.apple.cursor.3": "不可用"]
-        return names[id] ?? id.replacingOccurrences(of: "com.apple.", with: "")
+        CursorCatalog.title(id)
     }
 }

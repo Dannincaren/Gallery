@@ -9,6 +9,7 @@ final class GalleryStore: ObservableObject {
     @Published var selectedRole: String = ""
     @Published var selectedMotion: Motion = .normal
     @Published var message: String?
+    @Published private(set) var importing = false
     @Published private(set) var saveStatus = "已保存在本机"
     let runtime = CursorRuntime()
     private var pendingSave: DispatchWorkItem?
@@ -26,22 +27,32 @@ final class GalleryStore: ObservableObject {
         } else { theme = fallback }
         selectedRole = theme.roles[0].id
     }
+    var visibleRoles: [CursorRole] {
+        var seen = Set<String>()
+        return theme.roles.filter { seen.insert($0.name).inserted }
+    }
     var roleIndex: Int? { theme.roles.firstIndex { $0.id == selectedRole } }
     var clip: CursorClip? { roleIndex.flatMap { theme.roles[$0].clip(selectedMotion) } }
     func edit(_ action: (inout CursorClip) -> Void) {
         guard !runtime.enabled, let index = roleIndex, var clip else { return }
         action(&clip)
-        theme.roles[index].clips[selectedMotion.rawValue] = clip
+        let name = theme.roles[index].name
+        for i in theme.roles.indices where theme.roles[i].name == name {
+            theme.roles[i].clips[selectedMotion.rawValue] = clip
+        }
         changed()
     }
     func createClip() {
         guard !runtime.enabled, let index = roleIndex else { return }
-        theme.roles[index].clips[selectedMotion.rawValue] = theme.roles[index].clip(.normal)
+        let name = theme.roles[index].name, clip = theme.roles[index].clip(.normal)
+        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func removeClip() {
         guard !runtime.enabled, selectedMotion != .normal, let index = roleIndex else { return }
-        theme.roles[index].clips.removeValue(forKey: selectedMotion.rawValue); changed()
+        let name = theme.roles[index].name
+        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
+        changed()
     }
     func changed() {
         pendingSave?.cancel(); saveStatus = "正在保存…"
@@ -56,14 +67,44 @@ final class GalleryStore: ObservableObject {
         } catch { saveStatus = "保存失败"; message = error.localizedDescription }
     }
     func openTheme() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.data]; panel.allowsMultipleSelection = false
-        panel.message = "选择 .cape 或 .gallery 主题"
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.item]; panel.allowsMultipleSelection = false
+        panel.message = "选择 Gallery 主题（.gallery）、Mousecape 主题（.cape），或 PRTS Windows 安装包（.zip / PRTS-Setup.exe）。"
+        panel.prompt = "导入"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let imported = try ThemeFiles.load(url)
-            guard runtime.stop() else { return }
-            theme = imported; selectedRole = imported.roles[0].id; selectedMotion = .normal; changed()
-        } catch { message = error.localizedDescription }
+        importURL(url)
+    }
+    func importURL(_ url: URL) {
+        guard !importing else { return }
+        let ext = url.pathExtension.lowercased()
+        guard ["gallery", "cape", "zip", "exe"].contains(ext) else {
+            message = "请选择 .gallery、.cape、PRTS Windows .zip 或 PRTS-Setup.exe。"; return
+        }
+        importing = true; saveStatus = "正在导入主题…"
+        let securityScoped = url.startAccessingSecurityScopedResource()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result { () -> GalleryTheme in
+                defer { if securityScoped { url.stopAccessingSecurityScopedResource() } }
+                if ext == "gallery" || ext == "cape" { return try ThemeFiles.load(url) }
+                return try PRTSImport.load(url)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importing = false
+                switch result {
+                case .success(let imported):
+                    guard self.runtime.stop() else { return }
+                    self.theme = imported; self.selectedRole = imported.roles[0].id; self.selectedMotion = .normal; self.changed()
+                    self.message = "已导入「\(imported.name)」，包含 \(self.visibleRoles.count) 类指针。点击「应用主题」启用；可导出为 .gallery，以后直接打开这个文件即可。"
+                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
+                }
+            }
+        }
+    }
+    func setSplitClick(_ enabled: Bool) {
+        guard !runtime.enabled, let index = roleIndex else { return }
+        let name = theme.roles[index].name
+        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].splitClickAnimation = enabled }
+        changed()
     }
     func exportTheme(cape: Bool = false) {
         let panel = NSSavePanel()
@@ -92,49 +133,14 @@ final class GalleryStore: ObservableObject {
             }
             result.frames = (append ? old.frames : []) + newFrames
             try result.validate()
-            theme.roles[index].clips[selectedMotion.rawValue] = result; changed()
+            let name = theme.roles[index].name
+            for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips[selectedMotion.rawValue] = result }
+            changed()
         } catch { message = error.localizedDescription }
     }
     func resetDemo() {
         guard runtime.stop() else { return }
         theme = Demo.makeTheme(); selectedRole = theme.roles[0].id; selectedMotion = .normal; changed()
     }
-    func importPRTS() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.data]; panel.allowsMultipleSelection = false
-        panel.message = "选择 PRTS Windows 发布包 ZIP，或解压后的 PRTS-Setup.exe。只读取嵌入素材，不运行 Windows 程序。"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        saveStatus = "正在导入 PRTS…"
-        // Archive expansion and image decoding are deliberately off the UI thread.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { () -> GalleryTheme in
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                defer { try? FileManager.default.removeItem(at: directory) }
-                var input = url
-                if url.pathExtension.lowercased() == "zip" {
-                    let extracted = directory.appendingPathComponent("PRTS-Setup.exe")
-                    FileManager.default.createFile(atPath: extracted.path, contents: nil)
-                    let output = try FileHandle(forWritingTo: extracted)
-                    defer { try? output.close() }
-                    let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-                    process.arguments = ["-p", url.path, "*/PRTS-Setup.exe"]
-                    process.standardOutput = output; process.standardError = FileHandle.nullDevice
-                    try process.run(); process.waitUntilExit()
-                    guard process.terminationStatus == 0 else { throw ThemeError.invalid("ZIP 中没有找到 PRTS-Setup.exe。") }
-                    input = extracted
-                }
-                let data = try Data(contentsOf: input, options: .mappedIfSafe)
-                return try WindowsResources(data: data).theme()
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let imported):
-                    guard self.runtime.stop() else { return }
-                    self.theme = imported; self.selectedRole = imported.roles[0].id; self.selectedMotion = .normal; self.changed()
-                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
-                }
-            }
-        }
-    }
+    func importPRTS() { openTheme() }
 }

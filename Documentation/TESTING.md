@@ -10,6 +10,9 @@
 - CUR 热点和 PNG 帧解析，拒绝坏文件、重复角色、无穷或非数值几何。
 - 可选真实 PRTS：CLI ManifestResource 只读提取，ANI 时序与帧解码，转换为 cape。
 - `bash Scripts/build.sh`：编译、应用包布局、Info.plist、临时签名验证。
+- 回归检查：仅箭头拆分默认、旧主题迁移、快速点击计数、完整 PRTS 状态映射、v2 主题去重。
+- `Scripts/runtime-check.sh`：实际前台是独立测试进程，Gallery 运行层在后台；检查实际交互显示层
+  中的按住帧、松手状态、水平调整、未知光标后重新识别及恢复系统常态。
 - `--self-check`：检测私有接口的符号是否存在；不证明调用行为兼容。
 
 ## 需要在实际桌面执行

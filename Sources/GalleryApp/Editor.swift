@@ -8,6 +8,7 @@ struct GalleryEditor: View {
     @State private var selectedFrame = 0
     @State private var previewStart = Date()
     @State private var showSettings = false
+    @State private var showImport = false
     init(store: GalleryStore) { self.store = store; self.runtime = store.runtime }
     var body: some View {
         NavigationSplitView {
@@ -24,13 +25,14 @@ struct GalleryEditor: View {
                     .onChange(of: store.theme.name) { _, _ in store.changed() }
                 List(selection: $store.selectedRole) {
                     Section("光标角色") {
-                        ForEach(store.theme.roles) { role in
+                        ForEach(store.visibleRoles) { role in
                             HStack {
-                                Image(systemName: role.name.contains("文本") ? "text.cursor" : "cursorarrow")
-                                    .foregroundStyle(store.selectedRole == role.id ? Color.white : Color.secondary).frame(width: 20)
+                                if let data = role.clip(.normal)?.frames.first, let image = NSImage(data: data) {
+                                    Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
+                                }
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(role.name).foregroundStyle(store.selectedRole == role.id ? Color.white : Color.primary)
-                                    Text("\(role.clips.count) 个状态").font(.caption2)
+                                    Text(CursorCatalog.assetOnly(role.id) ? "应用自定义 · 可编辑素材" : "\(role.clips.count) 个动画状态").font(.caption2)
                                         .foregroundStyle(store.selectedRole == role.id ? Color.white.opacity(0.8) : Color.secondary)
                                 }
                             }.padding(.vertical, 4).tag(role.id)
@@ -52,7 +54,20 @@ struct GalleryEditor: View {
                                 Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
                             }
                             Spacer()
+                            Button("导入主题…") { showImport = true }
                             if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
+                        }
+                        if store.importing {
+                            HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
+                        }
+                        if let index = store.roleIndex {
+                            Toggle("拆分按下、按住与松手动画", isOn: Binding(
+                                get: { store.theme.roles[index].splitClickAnimation }, set: { store.setSplitClick($0) }))
+                                .disabled(runtime.enabled)
+                            Text(store.theme.roles[index].splitClickAnimation
+                                 ? "按住时进入持续状态，松开时立即播放松手动画。默认仅正常选择启用。"
+                                 : "点击后自动连播按下与松手动画；不等待抬起，也不进入按住状态。")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Picker("动画状态", selection: $store.selectedMotion) {
                             ForEach(Motion.allCases) { Text($0.title).tag($0) }
@@ -75,13 +90,13 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.1 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.2 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
         .toolbar {
             ToolbarItemGroup {
-                Button { store.openTheme() } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
+                Button { showImport = true } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
                 Menu {
                     Button("从 PRTS Windows 包导入交互动画…") { store.importPRTS() }
                     Button("导出 Gallery 主题…") { store.exportTheme() }
@@ -97,6 +112,11 @@ struct GalleryEditor: View {
             }
         }
         .sheet(isPresented: $showSettings) { InteractionSettings(store: store, runtime: runtime) }
+        .sheet(isPresented: $showImport) { ImportThemePanel(store: store) }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first else { return false }
+            store.importURL(url); return true
+        }
         .alert("Gallery", isPresented: Binding(get: { store.message != nil || runtime.error != nil }, set: { if !$0 { store.message = nil; runtime.error = nil } })) {
             Button("好") { store.message = nil; runtime.error = nil }
         } message: { Text(runtime.error ?? store.message ?? "") }
@@ -147,7 +167,7 @@ struct GalleryEditor: View {
                 Text(store.selectedMotion.loops ? "此状态循环播放。" : "播放一次后进入下一状态；提前松手会立即播放松手动画。")
                     .font(.caption).foregroundStyle(.secondary)
                 if clip.frames.count > 24 {
-                    Label("系统播放会采样为 24 帧并保留总时长。", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+                    Label("Gallery 保留完整帧；导出 Mousecape 时采样为 24 帧。", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
                 }
             }.frame(width: 210).disabled(runtime.enabled)
         }
@@ -198,6 +218,41 @@ struct GalleryEditor: View {
             TextField(title, value: Binding(get: { value }, set: { if $0.isFinite { set(min(range.upperBound, max(range.lowerBound, $0))) } }), format: .number.precision(.fractionLength(0...2)))
                 .multilineTextAlignment(.trailing).textFieldStyle(.roundedBorder).frame(width: 75)
         }
+    }
+}
+
+private struct ImportThemePanel: View {
+    @ObservedObject var store: GalleryStore
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Label("导入主题", systemImage: "square.and.arrow.down").font(.title2.bold())
+            Text("把文件拖入 Gallery 窗口，或点击下方按钮选择。Gallery 会自动识别格式。")
+                .foregroundStyle(.secondary)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("已整理好的主题", systemImage: "photo.stack").font(.headline)
+                    Text("选择 .gallery 可一次导入全部指针、热点和交互动画。也支持原有 .cape 主题。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("原版 PRTS Windows 安装包", systemImage: "shippingbox").font(.headline)
+                    Text("直接选择下载的完整 ZIP；也可以选择解压后「程序文件」中的 PRTS-Setup.exe。无需安装或运行 Windows 程序。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text("注意：PRTS-Install.exe 只是安装入口，不含动画。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            }
+            HStack {
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("选择文件并导入…") {
+                    dismiss(); DispatchQueue.main.async { store.openTheme() }
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }.padding(28).frame(width: 540)
     }
 }
 

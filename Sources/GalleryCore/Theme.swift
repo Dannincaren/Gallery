@@ -52,8 +52,18 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     public var id: String
     public var name: String
     public var clips: [String: CursorClip]
-    public init(id: String, name: String, clips: [String: CursorClip]) {
+    public var splitClickAnimation: Bool
+    public init(id: String, name: String, clips: [String: CursorClip], splitClickAnimation: Bool? = nil) {
         self.id = id; self.name = name; self.clips = clips
+        self.splitClickAnimation = splitClickAnimation ?? CursorCatalog.isArrow(id)
+    }
+    private enum CodingKeys: String, CodingKey { case id, name, clips, splitClickAnimation }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        clips = try c.decode([String: CursorClip].self, forKey: .clips)
+        splitClickAnimation = try c.decodeIfPresent(Bool.self, forKey: .splitClickAnimation) ?? CursorCatalog.isArrow(id)
     }
     public func clip(_ motion: Motion) -> CursorClip? { clips[motion.rawValue] }
 }

@@ -11,7 +11,10 @@ final class ImportTests {
     func testCapeRoundTripPreservesOrderHotspotsAndSize() throws {
         let first = try frame(.red), last = try frame(.blue)
         let original = CursorClip(frames: [first, last], frameDuration: 0.13, width: 24, height: 24, hotX: 3.5, hotY: 6)
-        let restored = try CursorImages.fromCape(CursorImages.capeDictionary(original))
+        let dictionary = try CursorImages.capeDictionary(original)
+        let representations = dictionary["Representations"] as! [Data]
+        expectEqual(try representations.map { try CursorImages.bitmap($0).width }, [24, 48, 72])
+        let restored = try CursorImages.fromCape(dictionary)
         expectEqual(restored.frameDuration, 0.13)
         expectEqual(restored.hotX, 3.5)
         expectEqual(restored.hotY, 6)
@@ -79,6 +82,10 @@ final class ImportTests {
         expectNotNil(resources.resource(suffix: "normal_press.ani"))
         let theme = try resources.theme()
         try theme.validate()
+        expectGreater(theme.roles.count, 40)
+        for name in ["正常选择", "帮助选择", "链接选择", "后台运行", "忙", "精准选择", "手写", "移动", "候选选择", "垂直调整", "水平调整", "对角调整 ↗↙", "对角调整 ↖↘", "不可用"] {
+            expectNotNil(theme.roles.first { $0.name == name })
+        }
         if let path = ProcessInfo.processInfo.environment["GALLERY_IMPORT_PREVIEW"] {
             let arrow = theme.roles.first { $0.id == "com.apple.coregraphics.Arrow" }!
             for motion in Motion.allCases {
@@ -91,6 +98,8 @@ final class ImportTests {
         for motion in Motion.allCases { expectNotNil(arrow.clip(motion)) }
         let clip = try require(arrow.clip(.press))
         expectGreater(clip.frames.count, 1)
+        expectGreater(5.0, clip.duration)
+        expectGreater(5.0, arrow.clip(.release)!.duration)
         let dictionary = try CursorImages.capeDictionary(clip)
         let roundtrip = try CursorImages.fromCape(dictionary)
         expectEqual(roundtrip.duration, clip.duration, accuracy: 0.000001)

@@ -8,6 +8,8 @@ permissions:
 jobs:
   macos:
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Check imports and interaction behavior
@@ -20,3 +22,14 @@ jobs:
         with:
           name: Gallery-macOS
           path: dist/Gallery-macOS.zip
+      - name: Publish preview release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          tag="v$version"
+          notes="Documentation/RELEASE-$version.md"
+          if [[ -f "$notes" ]] && ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" dist/Gallery-macOS.zip --target "$GITHUB_SHA" --prerelease --title "Gallery $version 预览版" --notes-file "$notes"
+          fi

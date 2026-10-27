@@ -65,12 +65,13 @@ public enum AnimationImport {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size > 0, size <= 40_000_000 else { throw ThemeError.invalid("动画文件为空或超过 40 MB。") }
         let data = try Data(contentsOf: url)
-        return try read(data, extension: url.pathExtension)
+        let name = url.lastPathComponent.lowercased()
+        return try read(data, extension: url.pathExtension, trimTerminalHold: name.contains("_press") || name.contains("_release") || name == "beam_click.ani")
     }
-    public static func read(_ data: Data, extension ext: String) throws -> CursorClip {
+    public static func read(_ data: Data, extension ext: String, trimTerminalHold: Bool = false) throws -> CursorClip {
         guard !data.isEmpty, data.count <= 40_000_000 else { throw ThemeError.invalid("动画文件为空或过大。") }
         if ext.lowercased() == "cur" { let clip = try cursor(data); try clip.validate(); return clip }
-        if ext.lowercased() == "ani" { return try ani(data) }
+        if ext.lowercased() == "ani" { return try ani(data, trimTerminalHold: trimTerminalHold) }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { throw ThemeError.invalid("不支持此图像。") }
         let count = CGImageSourceGetCount(source)
         guard (1...240).contains(count) else { throw ThemeError.invalid("动画需要 1–240 帧。") }
@@ -87,7 +88,7 @@ public enum AnimationImport {
         }
         return try uniform(frames: frames, durations: durations, template: CursorClip(frames: frames))
     }
-    private static func ani(_ data: Data) throws -> CursorClip {
+    private static func ani(_ data: Data, trimTerminalHold: Bool) throws -> CursorClip {
         guard data.count >= 12, String(data: data.prefix(4), encoding: .ascii) == "RIFF",
               String(data: data[8..<12], encoding: .ascii) == "ACON",
               try u32(data, 4) + 8 == data.count else { throw ThemeError.invalid("无效 ANI 文件。") }
@@ -122,7 +123,15 @@ public enum AnimationImport {
         guard steps <= 10000 else { throw ThemeError.invalid("ANI 时序过长。") }
         let indices = sequence.isEmpty ? (0..<steps).map { $0 % frames.count } : sequence
         guard indices.count == steps, indices.allSatisfy({ $0 < frames.count }) else { throw ThemeError.invalid("ANI 帧索引越界。") }
-        let durations = (0..<steps).map { Double($0 < rates.count ? max(1, rates[$0]) : defaultRate) / 60 }
+        var durations = (0..<steps).map { Double($0 < rates.count ? max(1, rates[$0]) : defaultRate) / 60 }
+        // PRTS one-shot ANI files use a ~60-second final frame to stop Windows
+        // from looping. It is a freeze sentinel, not part of the transition.
+        // Gallery owns hold/release timing, so preserve the transition and trim
+        // only that terminal sentinel; do not uniformly sample a minute of stills.
+        if trimTerminalHold, durations.count > 1, let last = durations.last, last >= 10 {
+            let typical = durations.dropLast().sorted()[max(0, (durations.count - 2) / 2)]
+            if last > typical * 30 { durations[durations.count - 1] = max(1.0 / 60, typical) }
+        }
         return try uniform(frames: indices.map { frames[$0].frames[0] }, durations: durations, template: template)
     }
     private static func uniform(frames: [Data], durations: [Double], template: CursorClip) throws -> CursorClip {

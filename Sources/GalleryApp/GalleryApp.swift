@@ -4,7 +4,12 @@ import GalleryCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var store: GalleryStore?
+    var store: GalleryStore? { didSet { if let pendingURL { self.pendingURL = nil; store?.importURL(pendingURL) } } }
+    private var pendingURL: URL?
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first else { return }
+        if let store { store.importURL(url) } else { pendingURL = url }
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         store?.saveNow()
         guard store?.runtime.stop() != false else { return .terminateCancel }
@@ -22,8 +27,19 @@ struct GalleryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store: GalleryStore
     init() {
+        if let index = CommandLine.arguments.firstIndex(of: "--convert-prts"), CommandLine.arguments.count > index + 2 {
+            do {
+                let theme = try PRTSImport.load(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+                try ThemeFiles.save(theme, to: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
+                print("Converted \(theme.roles.count) system variants / \(Set(theme.roles.map(\.name)).count) categories")
+                exit(0)
+            } catch { print(error.localizedDescription); exit(2) }
+        }
         if CommandLine.arguments.contains("--self-check") {
             print("Gallery native capabilities: \(GLCursorBridge.diagnostics())")
+            for id in ["com.apple.coregraphics.Arrow", "com.apple.cursor.19", "com.apple.cursor.23"] {
+                if let c = GLCursorBridge.standardCursor(id) { print(id, "core=", c["CoreCursorType"] ?? "?", "size=", c["PointsWide"] ?? "?") }
+            }
             print("No cursor resources were changed.")
             exit(GLCursorBridge.available() ? 0 : 2)
         }
@@ -48,6 +64,10 @@ struct GalleryApp: App {
             app.setActivationPolicy(.prohibited)
             app.appearance = NSAppearance(named: .aqua)
             let store = GalleryStore(preview: true)
+            if CommandLine.arguments.count > index + 2,
+               let theme = try? ThemeFiles.load(URL(fileURLWithPath: CommandLine.arguments[index + 2])) {
+                store.theme = theme; store.selectedRole = theme.roles[0].id
+            }
             let host = NSHostingView(rootView: GalleryEditor(store: store).frame(width: 1120, height: 780).environment(\.colorScheme, .light))
             host.frame = NSRect(x: 0, y: 0, width: 1120, height: 780)
             let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

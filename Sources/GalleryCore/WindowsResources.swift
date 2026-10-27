@@ -104,21 +104,25 @@ public struct WindowsResources {
         return data.subdata(in: range)
     }
     public func theme() throws -> GalleryTheme {
-        let mapping = [("com.apple.coregraphics.Arrow", "normal"), ("com.apple.coregraphics.IBeam", "beam"),
-                       ("com.apple.coregraphics.IBeamXOR", "beam"), ("com.apple.cursor.2", "link"),
-                       ("com.apple.cursor.13", "link"), ("com.apple.cursor.40", "helpsel")]
         var roles: [CursorRole] = []
-        for (id, prefix) in mapping {
-            guard let data = resource(suffix: prefix + ".cur") else { continue }
-            let base = try AnimationImport.read(data, extension: "cur")
-            var clips = [Motion.normal.rawValue: resized(base)]
+        var cache: [String: CursorClip] = [:]
+        func load(_ name: String) throws -> CursorClip? {
+            if let clip = cache[name] { return clip }
+            guard let data = resource(suffix: name) else { return nil }
+            let clip = resized(try AnimationImport.read(data, extension: URL(fileURLWithPath: name).pathExtension,
+                trimTerminalHold: name.contains("_press") || name.contains("_release") || name == "beam_click.ani"))
+            cache[name] = clip; return clip
+        }
+        for descriptor in CursorCatalog.all {
+            guard let base = try load(descriptor.resource) else { continue }
+            let prefix = URL(fileURLWithPath: descriptor.resource).deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_loop", with: "")
+            var clips = [Motion.normal.rawValue: base]
             for (motion, filename) in [(Motion.press, prefix == "beam" ? "beam_click.ani" : prefix + "_press.ani"),
-                                       (.hold, prefix + "_hold.cur"), (.release, prefix + "_release.ani"), (.idle, "idle.ani")] {
-                if let data = resource(suffix: filename) {
-                    clips[motion.rawValue] = resized(try AnimationImport.read(data, extension: URL(fileURLWithPath: filename).pathExtension))
-                }
+                                       (.hold, prefix + "_hold.cur"), (.release, prefix + "_release.ani")] {
+                clips[motion.rawValue] = try load(filename)
             }
-            roles.append(CursorRole(id: id, name: ThemeFiles.roleName(id), clips: clips))
+            if CursorCatalog.isArrow(descriptor.id) { clips[Motion.idle.rawValue] = try load("idle.ani") }
+            roles.append(CursorRole(id: descriptor.id, name: descriptor.title, clips: clips))
         }
         let theme = GalleryTheme(name: "PRTS · Gallery", author: "PRTS 原作者 / 用户本地导入", roles: roles)
         try theme.validate(); return theme

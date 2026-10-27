@@ -6,10 +6,21 @@
     <key>CFBundleExecutable</key><string>Gallery</string>
     <key>CFBundleIdentifier</key><string>io.github.rp0902.Gallery</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.2.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>CFBundleDocumentTypes</key><array><dict>
+        <key>CFBundleTypeName</key><string>Gallery 主题</string>
+        <key>CFBundleTypeRole</key><string>Editor</string>
+        <key>LSItemContentTypes</key><array><string>io.github.rp0902.gallery.theme</string></array>
+    </dict></array>
+    <key>UTExportedTypeDeclarations</key><array><dict>
+        <key>UTTypeIdentifier</key><string>io.github.rp0902.gallery.theme</string>
+        <key>UTTypeDescription</key><string>Gallery 主题</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+        <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>gallery</string></array></dict>
+    </dict></array>
     <key>NSHumanReadableCopyright</key><string>Gallery contributors. Includes Mousecape-derived code © Alex Zielenski. Noncommercial use only; see LICENSE.</string>
 </dict></plist>

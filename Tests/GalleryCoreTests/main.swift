@@ -20,6 +20,7 @@ func require<T>(_ value: T?) throws -> T {
     return value
 }
 let interaction = InteractionTests(), imports = ImportTests()
+let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
     ("release interrupts press", interaction.testReleaseInterruptsPressAndExpires),
     ("new click replaces pending release", interaction.testNewClickReplacesOldReleaseDeadline),
@@ -30,7 +31,13 @@ var checks: [(String, () throws -> Void)] = [
     ("invalid geometry and nonfinite timing", imports.testRejectsInvalidGeometryAndNonFiniteTiming),
     ("duplicate roles and malformed PE rejection", imports.testDuplicateRolesAndMalformedPEAreRejected),
     ("CUR decoding and hotspot", imports.testCURHotspotAndPixels),
-    ("CUR DIB alpha and bottom-up orientation", imports.testCURDIBAlphaAndBottomUpOrder)
+    ("CUR DIB alpha and bottom-up orientation", imports.testCURDIBAlphaAndBottomUpOrder),
+    ("unsplit click completes after quick mouse-up", regression.testUnsplitClickCompletesWithoutHoldOrRelease),
+    ("unsplit click automatically plays the release segment", regression.testUnsplitClickAutomaticallyPlaysRelease),
+    ("arrow-only split defaults and old theme migration", regression.testRoleDefaultsAndLegacyMigration),
+    ("background quick-click counters and wrap", regression.testPassiveQuickClickAndCounterWrap),
+    ("portable archive deduplication and overrides", regression.testArchiveDeduplicatesAndPreservesOverrides),
+    ("known-unknown-known cursor recovery", regression.testUnknownDoesNotPoisonLaterKnownMatch)
 ]
 if ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"] != nil {
     checks.append(("real PRTS resource extraction, ANI and cape conversion", imports.testRealPRTSOptionalIntegration))
