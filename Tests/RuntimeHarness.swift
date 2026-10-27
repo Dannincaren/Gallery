@@ -189,6 +189,37 @@ struct RuntimeHarness {
                 else if visible.maxX < frame.maxX - 20 { point = CGPoint(x: frame.maxX - 5, y: frame.midY) }
                 else { point = CGPoint(x: frame.midX, y: frame.minY + 5) }
                 CGWarpMouseCursorPosition(CGPoint(x: point.x, y: frame.maxY - point.y)); pump(0.8)
+                func dockRectangle() -> CGRect? {
+                    let dockPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
+                    let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+                    if let rect = windows.compactMap({ row -> CGRect? in
+                        guard (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == dockPID,
+                              let values = row[kCGWindowBounds as String] as? [String: Any],
+                              let rect = CGRect(dictionaryRepresentation: values as CFDictionary),
+                              min(rect.width, rect.height) > 20,
+                              rect.width < frame.width * 0.4 || rect.height < frame.height * 0.4 else { return nil }
+                        return rect
+                    }).max(by: { $0.width * $0.height < $1.width * $1.height }) { return rect }
+                    // Recent macOS can expose only a full-display Dock host,
+                    // not its visible subwindow. Use the system's reserved
+                    // Dock band, rather than a point at the screen border.
+                    let orientation = UserDefaults.standard.persistentDomain(forName: "com.apple.dock")?["orientation"] as? String ?? "bottom"
+                    if orientation == "left", visible.minX - frame.minX > 20 {
+                        return CGRect(x: frame.minX, y: 0, width: visible.minX - frame.minX, height: frame.height)
+                    }
+                    if orientation == "right", frame.maxX - visible.maxX > 20 {
+                        return CGRect(x: visible.maxX, y: 0, width: frame.maxX - visible.maxX, height: frame.height)
+                    }
+                    if visible.minY - frame.minY > 20 {
+                        return CGRect(x: frame.minX, y: frame.height - (visible.minY - frame.minY), width: frame.width, height: visible.minY - frame.minY)
+                    }
+                    return nil
+                }
+                guard let dock = dockRectangle() else { throw ThemeError.invalid("未找到实际 Dock 窗口，不能确认悬停验证") }
+                let dockPoint = CGPoint(x: dock.midX, y: dock.midY)
+                CGWarpMouseCursorPosition(dockPoint); pump(0.6)
+                try verify(dock.contains(CGEvent(source: nil)!.location), "指针未进入实际 Dock 窗口")
+                print("DOCK system-reported hover region", dock, "pointer", dockPoint)
                 for _ in 0..<15 {
                     try verify(!(runtime.overlayVisible && GLCursorBridge.cursorVisibility() == 1), "Dock 中出现双光标")
                     pump(0.02)
