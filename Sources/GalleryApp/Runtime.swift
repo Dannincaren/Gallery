@@ -19,6 +19,7 @@ final class CursorRuntime: ObservableObject {
     private var recognizing = false
     private var generation = 0
     private var roleID: String?
+    private var roleRevision = 0
     private var roleAliases: [String] = []
     private var machine = InteractionMachine(now: ProcessInfo.processInfo.systemUptime)
     private var timer: Timer?
@@ -30,8 +31,7 @@ final class CursorRuntime: ObservableObject {
     private var lastUpCount: UInt32 = 0
     private var lastScrollCheck = 0.0
     private var lastWatchdog = 0.0
-    private var lastMovement = 0.0
-    private var lastRender = 0.0
+    private var lastCornerCheck = 0.0
     private var fastPollingUntil = 0.0
     private var lastLeftEdge = -Double.infinity
     private var lastLeftDown = 0.0
@@ -92,6 +92,7 @@ final class CursorRuntime: ObservableObject {
     var testRecognitionSuspended = false
     func testIdentify(_ ids: [String]) { lastSeed = GLCursorBridge.cursorSeed(); applyIdentification(CursorIdentification(roles: ids, appliedRoles: [])) }
     var testRole: String? { roleID }
+    var testEffectiveIdleDelay: Double { idleDelay }
     func testScene(_ value: Bool?) { scenes.testOverride = value; scenes.check(force: true) }
     func testRoleScale(_ id: String) -> Double? { roles[id]?.scale }
     var testStats: [String: Any] {
@@ -109,6 +110,13 @@ final class CursorRuntime: ObservableObject {
     var diagnostics: String { GLCursorBridge.diagnostics() + " · " + observation.description }
     private var now: Double { ProcessInfo.processInfo.systemUptime }
     private var currentRole: CursorRole? { roleID.flatMap { roles[$0] } }
+    private var idleDelay: Double { currentRole?.idleDelay(default: theme?.idleDelay ?? 8) ?? theme?.idleDelay ?? 8 }
+    func setRoleIdleDelay(_ value: Double?, for identifier: String) {
+        guard value == nil || (value!.isFinite && (1...600).contains(value!)) else { return }
+        let family = CursorCatalog.family(identifier)
+        for id in roles.keys where CursorCatalog.family(id) == family { roles[id]?.idleDelayOverride = value }
+        scheduleNext()
+    }
     private func counter(_ type: CGEventType) -> UInt32 { CGEventSource.counterForEventType(.combinedSessionState, eventType: type) }
 
     func start(_ input: GalleryTheme) {
@@ -173,7 +181,7 @@ final class CursorRuntime: ObservableObject {
             scenes.check(force: true)
             activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "保持交互光标响应")
             lastLeftEdge = -Double.infinity; lastLeftDown = 0; lastLeftUp = 0; lastWatchdog = now
-            lastMovement = now - 1; lastRender = 0; tickCount = 0; unknownSince = nil
+            lastCornerCheck = 0; tickCount = 0; unknownSince = nil
             status = "已启用 · 关闭窗口后继续运行"; updateIdentification(); armTimer(after: 0.008)
         } catch {
             let message = error.localizedDescription
@@ -226,10 +234,12 @@ final class CursorRuntime: ObservableObject {
         guard seed != lastSeed || now - lastProbe > 1 else { return }
         lastProbe = now; recognizing = true
         let currentGeneration = generation
+        let currentRoleRevision = roleRevision
         recognition.probe { [weak self] seed, found in
             DispatchQueue.main.async {
                 guard let self, self.enabled, currentGeneration == self.generation else { return }
                 self.recognizing = false
+                guard currentRoleRevision == self.roleRevision else { self.armTimer(after: 0.001); return }
                 let current = GLCursorBridge.cursorSeed()
                 // Capture runs on a worker: its image may have changed to one
                 // of our frames after the request was enqueued. Filter again
@@ -254,6 +264,7 @@ final class CursorRuntime: ObservableObject {
         // Alias-only changes must never restart a click or jump to hold.
         roleAliases = ids
         if selected != roleID {
+            roleRevision += 1
             roleID = selected
             let held = machine.buttonDown && physicalLeftDown()
             machine.reset(now: now)
@@ -261,7 +272,7 @@ final class CursorRuntime: ObservableObject {
                 machine.down(now: lastLeftDown, pressDuration: currentRole?.clip(.press)?.duration,
                     enabled: theme?.clickEnabled ?? false, split: currentRole?.splitClickAnimation ?? false,
                     releaseDuration: currentRole?.clip(.release)?.duration)
-                machine.tick(now: now, idleDelay: theme?.idleDelay ?? 8, idleEnabled: false)
+                machine.tick(now: now, idleDelay: idleDelay, idleEnabled: false)
             }
             if selected == nil {
                 renderer.passThrough()
@@ -323,11 +334,11 @@ final class CursorRuntime: ObservableObject {
     }
     private func scheduleNext() {
         guard enabled else { return }
-        let delay = PointerSchedule.delay(now: now, lastMovement: lastMovement,
+        let delay = PointerSchedule.delay(now: now,
             polling: !observation.active || now < fastPollingUntil, paused: paused,
             frameDeadline: [renderer.nextFrameDeadline, shakeEnabled ? shake.nextDeadline(at: now) : nil].compactMap { $0 }.min(), transitionDeadline: machine.transitionDeadline,
             idleDeadline: (theme?.idleEnabled == true && currentRole?.clip(.idle) != nil && !machine.buttonDown && machine.motion == .normal)
-                ? machine.lastActivity + (theme?.idleDelay ?? 8) : nil)
+                ? machine.lastActivity + idleDelay : nil)
         armTimer(after: delay)
     }
     private func tick() {
@@ -342,7 +353,7 @@ final class CursorRuntime: ObservableObject {
         }
         let location = NSEvent.mouseLocation
         if location != lastLocation {
-            machine.activity(now: now); lastLocation = location; lastMovement = now
+            machine.activity(now: now); lastLocation = location
             if shakeEnabled { shake.observe(x: location.x, y: location.y, at: now) }
         }
         synchronizeEditorCorner(at: location)
@@ -352,7 +363,7 @@ final class CursorRuntime: ObservableObject {
             if scroll != lastScroll { machine.activity(now: now); lastScroll = scroll }
         }
         reconcileRelease()
-        machine.tick(now: now, idleDelay: theme.idleDelay, idleEnabled: theme.idleEnabled && currentRole?.clip(.idle) != nil)
+        machine.tick(now: now, idleDelay: idleDelay, idleEnabled: theme.idleEnabled && currentRole?.clip(.idle) != nil)
         updateIdentification(); render(); scheduleNext()
     }
     private func render() {
@@ -361,9 +372,9 @@ final class CursorRuntime: ObservableObject {
         let currentSeed = GLCursorBridge.cursorSeed()
         // Never overwrite an as-yet unrecognized foreground cursor with the
         // previous role. Our own submitted animation seeds are never matched.
-        guard scenes.missionControl || currentSeed == lastSeed || renderer.owns(seed: currentSeed) else { lastRender = now; return }
+        guard scenes.missionControl || currentSeed == lastSeed || renderer.owns(seed: currentSeed) else { return }
         if role.usesNative || normal[role.id] == nil {
-            renderer.passThrough(); updateStatus("\(role.name) · 系统原有光标"); lastRender = now; return
+            renderer.passThrough(); updateStatus("\(role.name) · 系统原有光标"); return
         }
         let motion: Motion = scenes.missionControl ? .normal : (role.clip(machine.motion) == nil ? .normal : machine.motion)
         let magnification = shakeEnabled ? shake.scale(at: now) : 1
@@ -385,7 +396,6 @@ final class CursorRuntime: ObservableObject {
             renderer.present(clip, role: role.id, motion: motion, scale: scale, started: machine.motionStartedAt, now: now, staticOnly: scenes.missionControl)
         }
         updateStatus(scenes.missionControl ? "调度中心 · 主题静态光标" : "\(role.name) · \(motion.title) · 系统光标通道")
-        lastRender = now
     }
     private func updateStatus(_ text: String) { if status != text { status = text } }
     private func synchronizeEditorCorner(at point: CGPoint) {
@@ -397,9 +407,12 @@ final class CursorRuntime: ObservableObject {
            roles["com.apple.cursor.35"] != nil {
             lastSeed = GLCursorBridge.cursorSeed()
             if !wasActive { applyIdentification(CursorIdentification(roles: ["com.apple.cursor.35"])) }
-        } else if wasActive && window.frame.insetBy(dx: 12, dy: 12).contains(point) {
-            lastSeed = GLCursorBridge.cursorSeed()
-            applyIdentification(CursorIdentification(roles: ["com.apple.coregraphics.Arrow"]))
+        } else if wasActive {
+            let seed = GLCursorBridge.cursorSeed()
+            if renderer.owns(seed: seed) || seed == lastSeed {
+                lastSeed = seed
+                applyIdentification(CursorIdentification(roles: ["com.apple.coregraphics.Arrow"]))
+            } else { updateIdentification() }
         }
     }
     private func handle(_ type: CGEventType, timestamp supplied: Double? = nil, position: CGPoint? = nil, observed: Bool = false, renderAfter: Bool = true) {
@@ -432,12 +445,17 @@ final class CursorRuntime: ObservableObject {
                 lastDownCount = counter(.leftMouseDown); lastUpCount = counter(.leftMouseUp); fastPollingUntil = 0
             }
             reconcileRelease()
-            machine.tick(now: now, idleDelay: theme.idleDelay, idleEnabled: false)
+            machine.tick(now: now, idleDelay: idleDelay, idleEnabled: false)
             if renderAfter { updateIdentification(); render(); scheduleNext() }
         default:
-            lastMovement = now
-            if wasIdle || now - lastRender >= 1.0 / 120 { tick() }
-            else { armTimer(after: 1.0 / 120 - (now - lastRender)) }
+            if wasIdle { tick(); return }
+            // Position is managed by macOS. Motion only needs to observe a
+            // changed role; it must not create a 120Hz rendering timer.
+            updateIdentification()
+            if NSApp.isActive && now - lastCornerCheck >= 1.0 / 120 {
+                lastCornerCheck = now; synchronizeEditorCorner(at: lastLocation)
+            }
+            if shakeEnabled, shake.nextDeadline(at: now) != nil { render(); scheduleNext() }
         }
     }
     private func installSessionObservers() {

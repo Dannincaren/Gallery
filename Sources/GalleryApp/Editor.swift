@@ -87,12 +87,9 @@ struct GalleryEditor: View {
                             if runtime.enabled && store.activeThemeID != store.selectedThemeID { Button("应用此主题") { store.applyCurrentTheme() } }
                         }
                         HStack(spacing: 12) {
-                            Image(systemName: "cursorarrow"); Text("全局大小")
-                            Slider(value: Binding(get: { preferences.pointerScale }, set: {
+                            NumericSlider(title: "全局大小", value: Binding(get: { preferences.pointerScale }, set: {
                                 preferences.pointerScale = $0; runtime.setScale($0)
-                            }), in: 0.5...3).frame(maxWidth: 300)
-                            Text("\(Int((preferences.pointerScale * 100).rounded()))%")
-                                .monospacedDigit().frame(width: 48)
+                            }), range: 50...300, unit: "%", multiplier: 100)
                             Button("还原") { preferences.pointerScale = 1; runtime.setScale(1) }
                             Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
                         }
@@ -112,6 +109,7 @@ struct GalleryEditor: View {
                         Picker("动画状态", selection: $store.selectedMotion) {
                             ForEach(Motion.allCases) { Text($0.title).tag($0) }
                         }.pickerStyle(.segmented)
+                        if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
                         if let clip = store.clip {
                             clipEditor(clip)
                         } else {
@@ -130,7 +128,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.5 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.5.1 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
@@ -171,6 +169,29 @@ struct GalleryEditor: View {
         .frame(minWidth: 960, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
+    private func idleTiming(_ role: CursorRole) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Label("待机等待", systemImage: "moon.zzz").font(.headline)
+                Spacer()
+                Picker("等待方式", selection: Binding(get: { role.idleDelayOverride != nil }, set: {
+                    store.setRoleIdleDelay($0 ? store.theme.idleDelay : nil, for: role.id)
+                })) {
+                    Text("跟随全局").tag(false)
+                    Text("单独设置").tag(true)
+                }.pickerStyle(.segmented).frame(width: 220)
+            }
+            if role.idleDelayOverride != nil {
+                NumericSlider(title: "静止后播放", value: Binding(get: { role.idleDelayOverride ?? store.theme.idleDelay }, set: {
+                    store.setRoleIdleDelay($0, for: role.id)
+                }), range: 1...60, unit: "秒", inputRange: 1...600).id(role.id + ":idle")
+                Text("拖动调整 1–60 秒，也可直接输入至 600 秒。").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("使用全局默认：\(Int(store.theme.idleDelay)) 秒。仅此角色可单独覆盖。").font(.callout).foregroundStyle(.secondary)
+            }
+            if !store.theme.idleEnabled { Text("全局待机动画已关闭，可在「交互与应用设置」中开启。").font(.caption).foregroundStyle(.secondary) }
+        }.padding(16).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+    }
     private var statusBar: some View {
         HStack(spacing: 9) {
             Image(systemName: runtime.enabled ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(runtime.enabled ? .green : .secondary)
@@ -188,6 +209,9 @@ struct GalleryEditor: View {
                     let index = playing && !store.selectedMotion.loops ? min(n, clip.frames.count - 1) : n % clip.frames.count
                     HotspotPreview(clip: clip, frame: max(0, min(index, clip.frames.count - 1)), editable: !runtime.enabled) { x, y in
                         store.edit { $0.hotX = x; $0.hotY = y }
+                    }
+                    .onChange(of: !store.selectedMotion.loops && elapsed >= clip.duration) { _, finished in
+                        if finished && playing { selectedFrame = clip.frames.count - 1; playing = false }
                     }
                 }.frame(minWidth: 320, minHeight: 300).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
                 HStack {
@@ -262,10 +286,8 @@ struct GalleryEditor: View {
     private func roleControls(_ role: CursorRole) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Text("此角色大小")
-                Slider(value: Binding(get: { role.scale }, set: { store.setRoleScale($0, for: role.id) }), in: 0.5...3)
-                    .frame(maxWidth: 250).disabled(role.usesNative)
-                Text("\(Int((role.scale * 100).rounded()))%") .monospacedDigit().frame(width: 48)
+                NumericSlider(title: "此角色大小", value: Binding(get: { role.scale }, set: { store.setRoleScale($0, for: role.id) }),
+                              range: 50...300, unit: "%", multiplier: 100).disabled(role.usesNative).id(role.id + ":size")
                 Button("还原") { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
                 Text("叠加在全局大小之上").font(.caption).foregroundStyle(.secondary)
             }
@@ -388,7 +410,9 @@ private struct InteractionSettings: View {
                     }
                     Toggle("启动后自动应用当前主题", isOn: $preferences.applyAtLaunch)
                     Toggle("启用主题时隐藏 Dock 图标", isOn: $preferences.hideDockIconWhileRunning)
-                    Text("隐藏后可从菜单栏重新打开 Gallery；停用主题后恢复 Dock 图标。")
+                    Text(runtime.enabled && preferences.hideDockIconWhileRunning
+                         ? (NSApp.activationPolicy() == .accessory ? "Dock 图标已隐藏，可从菜单栏重新打开 Gallery。" : "正在隐藏 Dock 图标…")
+                         : "隐藏后可从菜单栏重新打开 Gallery；停用主题后恢复 Dock 图标。")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("请将应用放入「应用程序」后开启。存在待恢复记录时不会自动应用。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -399,11 +423,8 @@ private struct InteractionSettings: View {
             Form {
                 Section("交互动画") {
                     Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)
-                    HStack {
-                        Text("待机等待时间")
-                        Slider(value: $store.theme.idleDelay, in: 1...60, step: 1)
-                        Text("\(Int(store.theme.idleDelay)) 秒").monospacedDigit().frame(width: 50)
-                    }
+                    NumericSlider(title: "默认等待", value: $store.theme.idleDelay, range: 1...60, unit: "秒", inputRange: 1...600)
+                    Text("各角色可在「待机」页单独设置，未设置时使用此默认值。").font(.caption).foregroundStyle(.secondary)
                     Toggle("播放左键按下、按住与松手动画", isOn: $store.theme.clickEnabled)
                 }
                 Section("在这些应用中暂停交互动画") {

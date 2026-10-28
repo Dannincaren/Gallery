@@ -3,12 +3,51 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testHighResolutionStaticCursorObservation() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)], hotX: 4, hotY: 4)
+        let image = try CursorImages.bitmap(clip.frames[0])
+        let context = CGContext(data: nil, width: 320, height: 320, bitsPerComponent: 8, bytesPerRow: 1280,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 320, height: 320))
+        var matcher = CursorMatcher(); matcher.add(clip, role: "arrow")
+        expectEqual(matcher.identify(image: context.makeImage()!, width: 320, height: 320, hotX: 40, hotY: 40).roles, ["arrow"])
+    }
+    func testRepeatedFrameRunsKeepLoopTiming() {
+        let runs = FrameRunSchedule([1, 1, 2, 2, 1])
+        expectEqual(runs.nextChange(after: 0, looping: true), 2)
+        expectEqual(runs.nextChange(after: 2, looping: true), 4)
+        expectEqual(runs.nextChange(after: 4, looping: true), 7)
+        expectEqual(runs.nextChange(after: 5, looping: true), 7)
+        expectEqual(runs.nextChange(after: 4, looping: false), nil)
+        let still = FrameRunSchedule([7, 7, 7])
+        expectEqual(still.isStatic, true); expectEqual(still.nextChange(after: 0, looping: true), nil)
+    }
+    func testRoleIdleOverrideArchiveAndLegacy() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)])
+        let role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip, "idle": clip], idleDelayOverride: 17)
+        var theme = GalleryTheme(name: "Idle", roles: [role]); theme.idleDelay = 5
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gallery")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try ThemeFiles.save(theme, to: url)
+        expectEqual(try ThemeFiles.load(url), theme)
+        var m = InteractionMachine(now: 0)
+        m.tick(now: 6, idleDelay: role.idleDelay(default: theme.idleDelay), idleEnabled: true)
+        expectEqual(m.motion, .normal)
+        m.tick(now: 17, idleDelay: role.idleDelay(default: theme.idleDelay), idleEnabled: true)
+        expectEqual(m.motion, .idle); expectEqual(m.motionStartedAt, 17)
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(role)) as! [String: Any]
+        object.removeValue(forKey: "idleDelayOverride")
+        let legacy = try JSONDecoder().decode(CursorRole.self, from: JSONSerialization.data(withJSONObject: object))
+        expectEqual(legacy.idleDelayOverride, nil); expectEqual(legacy.idleDelay(default: 5), 5)
+        theme.roles[0].idleDelayOverride = 0; expectThrows(try theme.validate())
+        theme.roles[0].idleDelayOverride = .infinity; expectThrows(try theme.validate())
+    }
     func testResizeCornerHysteresis() {
         var latch = ResizeCornerLatch()
         expectFalse(latch.update(rightDistance: 8, bottomDistance: 8))
         expectEqual(latch.update(rightDistance: 4, bottomDistance: 4), true)
-        expectEqual(latch.update(rightDistance: 9, bottomDistance: 9), true)
-        expectFalse(latch.update(rightDistance: 13, bottomDistance: 9))
+        expectEqual(latch.update(rightDistance: 6, bottomDistance: 6), true)
+        expectFalse(latch.update(rightDistance: 8, bottomDistance: 6))
         expectFalse(latch.update(rightDistance: 8, bottomDistance: 8))
     }
     func testRoleFamiliesIgnoreNamesAndSeparateSizes() {

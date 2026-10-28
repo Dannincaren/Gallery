@@ -6,7 +6,7 @@ public struct ResizeCornerLatch {
     public init() {}
     public mutating func reset() { active = false }
     public mutating func update(rightDistance: Double, bottomDistance: Double) -> Bool {
-        let threshold = active ? 12.0 : 5.0
+        let threshold = active ? 7.0 : 5.0
         active = abs(rightDistance) <= threshold && abs(bottomDistance) <= threshold
         return active
     }

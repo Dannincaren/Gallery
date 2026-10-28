@@ -25,6 +25,7 @@ final class GalleryStore: ObservableObject {
     private var revision = 0
     private var thumbnailJobs = Set<String>()
     private var subscriptions = Set<AnyCancellable>()
+    private var pendingDockRefresh: DispatchWorkItem?
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
     init(preview: Bool = false, rootURL: URL? = nil) {
@@ -59,14 +60,34 @@ final class GalleryStore: ObservableObject {
         runtime.setShakeEnabled(preferences.shakeToLocate)
         if selectionDefaults {
             runtime.$enabled.combineLatest(preferences.$hideDockIconWhileRunning)
-                .map { $0 && $1 }.removeDuplicates().sink { hidden in
-                    NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                .map { $0 && $1 }.removeDuplicates().sink { [weak self] _ in
+                    self?.refreshDockVisibility()
                 }.store(in: &subscriptions)
             preferences.$shakeToLocate.removeDuplicates().sink { [weak self] value in
                 self?.runtime.setShakeEnabled(value)
             }.store(in: &subscriptions)
+            for name in [NSApplication.didBecomeActiveNotification, NSApplication.didUnhideNotification, NSWindow.didBecomeMainNotification, NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
+                NotificationCenter.default.publisher(for: name).sink { [weak self] _ in
+                    self?.refreshDockVisibility()
+                }.store(in: &subscriptions)
+            }
         }
         if preferences.applyAtLaunch && !runtime.hasRecovery { applyCurrentTheme() }
+    }
+    func refreshDockVisibility() {
+        guard selectionDefaults else { return }
+        // SwiftUI can restore the regular activation policy when reopening a
+        // window. Reapply after that transaction, without a polling timer.
+        let apply = { [weak self] in
+            guard let self else { return }
+            let policy: NSApplication.ActivationPolicy = self.runtime.enabled && self.preferences.hideDockIconWhileRunning ? .accessory : .regular
+            if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
+            self.preferences.recordDockVisibility(hidden: NSApp.activationPolicy() == .accessory)
+        }
+        DispatchQueue.main.async(execute: apply)
+        pendingDockRefresh?.cancel()
+        let settled = DispatchWorkItem(block: apply); pendingDockRefresh = settled
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: settled)
     }
     func applyCurrentTheme() {
         guard runtime.stop() else { return }
@@ -255,8 +276,17 @@ final class GalleryStore: ObservableObject {
     func setRoleScale(_ value: Double, for identifier: String? = nil) {
         guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
         let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.5, value))
+        guard theme.roles.contains(where: { CursorCatalog.family($0.id) == family && $0.scale != value }) else { return }
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].scale = value }
         if activeThemeID == selectedThemeID { runtime.setRoleScale(value, for: theme.roles[index].id) }
+        changed()
+    }
+    func setRoleIdleDelay(_ value: Double?, for identifier: String) {
+        guard value == nil || (value!.isFinite && (1...600).contains(value!)) else { return }
+        let family = CursorCatalog.family(identifier)
+        guard theme.roles.contains(where: { CursorCatalog.family($0.id) == family && $0.idleDelayOverride != value }) else { return }
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].idleDelayOverride = value }
+        if activeThemeID == selectedThemeID { runtime.setRoleIdleDelay(value, for: identifier) }
         changed()
     }
     func setUsesNative(_ value: Bool) {

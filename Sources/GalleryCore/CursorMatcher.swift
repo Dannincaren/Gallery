@@ -106,7 +106,10 @@ public struct CursorMatcher {
     /// Direct bitmap matching keeps PNG conversion entirely out of observation.
     /// Registered animations are vertical filmstrips; validate three frames.
     public func identify(image: CGImage, width: Double, height: Double, hotX: Double, hotY: Double, frameCount: Int = 1) -> CursorIdentification {
-        if frameCount == 1, height <= 128,
+        // Global snapshots report physical bitmap dimensions, including 5x /
+        // 10x system representations. The theme's 128-point geometry limit
+        // must not reject a perfectly valid high-resolution static arrow.
+        if frameCount == 1,
            let sample = CursorFingerprint(image: image, width: width, height: height, hotX: hotX, hotY: hotY) {
             let result = identify(sample)
             if !result.roles.isEmpty { return result }

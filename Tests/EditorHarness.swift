@@ -65,6 +65,12 @@ struct EditorHarness {
             let isolated = try ThemeFiles.load(selectedURL)
             try verify(isolated.roles.map(\.scale) == [1, 1, 1.7, 1, 1.7], "独立大小保存失真")
             print("PASS same-name role isolation and captured slider target")
+            reopened.setRoleIdleDelay(23, for: roleIDs[2]); reopened.saveNow(wait: true)
+            let idleSaved = try ThemeFiles.load(selectedURL)
+            try verify(idleSaved.roles.map(\.idleDelayOverride) == [nil, nil, 23, nil, 23], "角色待机时间串到其他角色或未保存")
+            reopened.setRoleIdleDelay(nil, for: roleIDs[2]); reopened.saveNow(wait: true)
+            try verify(try ThemeFiles.load(selectedURL).roles.allSatisfy { $0.idleDelayOverride == nil }, "恢复全局待机默认值失败")
+            print("PASS per-role idle override, alias persistence and default restoration")
             print("Editor checks passed; no user library or login settings changed")
         } catch { print("FAIL:", error.localizedDescription); exit(1) }
     }

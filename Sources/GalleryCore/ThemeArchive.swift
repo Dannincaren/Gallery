@@ -21,6 +21,7 @@ struct ThemeArchive: Codable {
         var scale: Double?
         var usesNative: Bool?
         var sourceThemeName: String?
+        var idleDelayOverride: Double?
         var clips: [String: Clip]
     }
     struct Clip: Codable {
@@ -44,7 +45,7 @@ struct ThemeArchive: Codable {
                 return Clip(frames: keys, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
             }
             return Role(id: role.id, name: role.name, splitClickAnimation: role.splitClickAnimation,
-                        scale: role.scale, usesNative: role.usesNative, sourceThemeName: role.sourceThemeName, clips: clips)
+                        scale: role.scale, usesNative: role.usesNative, sourceThemeName: role.sourceThemeName, idleDelayOverride: role.idleDelayOverride, clips: clips)
         }
         images = pool
     }
@@ -60,7 +61,7 @@ struct ThemeArchive: Codable {
                 return CursorClip(frames: frames, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
             }
             return CursorRole(id: role.id, name: role.name, clips: clips, splitClickAnimation: role.splitClickAnimation,
-                              scale: role.scale ?? 1, usesNative: role.usesNative ?? false, sourceThemeName: role.sourceThemeName)
+                              scale: role.scale ?? 1, usesNative: role.usesNative ?? false, sourceThemeName: role.sourceThemeName, idleDelayOverride: role.idleDelayOverride)
         }
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
         theme.idleDelay = idleDelay; theme.idleEnabled = idleEnabled; theme.clickEnabled = clickEnabled

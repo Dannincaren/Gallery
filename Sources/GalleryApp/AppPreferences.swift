@@ -5,7 +5,7 @@ import ServiceManagement
 @MainActor
 final class AppPreferences: ObservableObject {
     @Published var pointerScale: Double {
-        didSet { UserDefaults.standard.set(pointerScale, forKey: "pointerScale") }
+        didSet { if pointerScale != oldValue { UserDefaults.standard.set(pointerScale, forKey: "pointerScale") } }
     }
     @Published var applyAtLaunch: Bool {
         didSet { UserDefaults.standard.set(applyAtLaunch, forKey: "applyAtLaunch") }
@@ -18,6 +18,7 @@ final class AppPreferences: ObservableObject {
     }
     @Published private(set) var launchAtLogin = false
     @Published private(set) var needsApproval = false
+    @Published private(set) var dockIconHidden = false
     @Published var error: String?
     init() {
         let saved = UserDefaults.standard.double(forKey: "pointerScale")
@@ -32,6 +33,7 @@ final class AppPreferences: ObservableObject {
         launchAtLogin = status == .enabled
         needsApproval = status == .requiresApproval
     }
+    func recordDockVisibility(hidden: Bool) { if dockIconHidden != hidden { dockIconHidden = hidden } }
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled { try SMAppService.mainApp.register() }

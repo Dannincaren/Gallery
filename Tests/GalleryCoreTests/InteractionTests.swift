@@ -29,13 +29,12 @@ final class InteractionTests {
         expectEqual(m.transitionDeadline, nil)
     }
     func testAdaptiveWakeupDeadlines() {
-        func delay(_ movement: Double = 0, polling: Bool = false, paused: Bool = false,
+        func delay(polling: Bool = false, paused: Bool = false,
                    frame: Double? = nil, transition: Double? = nil, idle: Double? = nil) -> Double {
-            PointerSchedule.delay(now: 10, lastMovement: movement, polling: polling, paused: paused,
+            PointerSchedule.delay(now: 10, polling: polling, paused: paused,
                                   frameDeadline: frame, transitionDeadline: transition, idleDeadline: idle)
         }
         expectEqual(delay(), 0.2)
-        expectEqual(delay(9.95), 1.0 / 120)
         expectEqual(delay(polling: true), 1.0 / 120)
         expectEqual(delay(paused: true, frame: 10.01), 1)
         expectEqual(delay(frame: 10.05), 0.05, accuracy: 0.00001)

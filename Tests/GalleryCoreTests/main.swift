@@ -22,6 +22,9 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("high-resolution static cursor returns to arrow", regression.testHighResolutionStaticCursorObservation),
+    ("duplicate frame runs preserve loop timing", regression.testRepeatedFrameRunsKeepLoopTiming),
+    ("per-role idle deadline, archive and legacy defaults", regression.testRoleIdleOverrideArchiveAndLegacy),
     ("Gallery resize corner hysteresis", regression.testResizeCornerHysteresis),
     ("role families isolate link, horizontal and vertical settings", regression.testRoleFamiliesIgnoreNamesAndSeparateSizes),
     ("deliberate shake, ordinary motion and recovery", regression.testDeliberateShakeAndRecovery),

@@ -43,8 +43,19 @@ struct RuntimeHarness {
                 try verify(GLCursorBridge.cursorVisibility() != 0, "快速角色切换导致光标消失")
                 try verify(renderer.size.width == (i % 2 == 0 ? 32 : 48), "尺寸缓存串到其他角色")
             }
+            let repeatedClip = CursorClip(frames: [data[0], data[0], data[2]], frameDuration: 0.1)
+            let repeated = try PreparedCursors(roles: [CursorRole(id: "repeat", name: "Repeat", clips: ["normal": repeatedClip])]).clip(role: "repeat", motion: .normal)!
+            renderer.present(repeated, role: "repeat", motion: .normal, scale: 1, started: start, now: start)
+            let submitted = renderer.submissions
+            renderer.present(repeated, role: "repeat", motion: .normal, scale: 1, started: start, now: start + 0.11)
+            try verify(renderer.submissions == submitted, "重复帧仍重复提交")
+            try verify(abs((renderer.nextFrameDeadline ?? 0) - (start + 0.2)) < 0.001, "跳过重复帧改变了停留时长")
             renderer.stop(restoring: initial)
             print("PASS native frames, 300 switches, visibility and independent geometry")
+            let originalArrowClip = try CursorImages.fromCape(GLCursorBridge.standardCursor("com.apple.coregraphics.Arrow")!)
+            let originalArrow = NSCursor(image: NSImage(cgImage: try CursorImages.bitmap(originalArrowClip.frames[0]),
+                size: NSSize(width: originalArrowClip.width, height: originalArrowClip.height)),
+                hotSpot: NSPoint(x: originalArrowClip.hotX, y: originalArrowClip.hotY))
             var theme = try ThemeFiles.load(URL(fileURLWithPath: CommandLine.arguments[2])); theme.idleEnabled = false
             let engine = CursorRuntime(recoveryURL: root.appendingPathComponent("recovery.plist")); runtime = engine
             if engine.hasRecovery { engine.recover() }; engine.start(theme)
@@ -55,6 +66,13 @@ struct RuntimeHarness {
             }
             engine.testIdentify([link]); engine.setRoleScale(1.7, for: horizontal)
             try verify(engine.testRoleScale(horizontal) == 1.7 && engine.testRoleScale(link) == 1 && engine.testRoleScale(vertical) == 1, "独立大小在运行层串联")
+            engine.setRoleIdleDelay(23, for: arrow); engine.testIdentify([arrow])
+            try verify(engine.testEffectiveIdleDelay == 23, "运行层未使用角色待机时间")
+            engine.testIdentify([link]); try verify(engine.testEffectiveIdleDelay == theme.idleDelay, "待机时间串到另一角色")
+            engine.setRoleIdleDelay(nil, for: arrow)
+            let movementTicks = engine.tickCount
+            for _ in 0..<1000 { engine.injectObserved(.mouseMoved) }
+            try verify(engine.tickCount - movementTicks < 5, "纯移动仍触发高频渲染")
             engine.testPhysicalDown = true; engine.testIdentify([arrow]); engine.injectObserved(.leftMouseDown)
             let epoch = engine.testMotionStartedAt; engine.testIdentify(["com.apple.cursor.0"])
             try verify(engine.testMotionStartedAt == epoch && engine.testMotion == .press, "别名切换重播点按")
@@ -77,6 +95,13 @@ struct RuntimeHarness {
             engine.testRecognitionSuspended = false; engine.testIdentify([link]); pump(0.3)
             try verify(engine.testRole.map(CursorCatalog.family) == CursorCatalog.family(link), "自帧/外部切换后角色：\(engine.testRole ?? "nil")；\(engine.status)")
             try verify(GLCursorBridge.cursorVisibility() != 0, "运行层隐藏了系统光标")
+            for resize in [horizontal, vertical, "com.apple.cursor.35"] {
+                engine.testIdentify([resize]); pump(0.06)
+                _ = GLCursorBridge.present(originalArrow)
+                pump(0.18)
+                try verify(engine.testRole.map(CursorCatalog.family) == CursorCatalog.family(arrow), "离开调整角色后仍残留：\(engine.testRole ?? "nil")")
+            }
+            print("PASS resize-to-native-arrow restoration")
             try verify(engine.stop() && !engine.hasRecovery, "停用未恢复备份")
             print("PASS runtime role isolation, click interruption, self-seed filtering, static wakeups and restore")
         } catch { _ = runtime?.stop(); renderer.stop(restoring: initial); print("FAIL", error.localizedDescription); exit(1) }

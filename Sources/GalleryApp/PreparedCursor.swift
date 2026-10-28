@@ -8,6 +8,11 @@ struct PreparedFrame {
 struct PreparedClip {
     let clip: CursorClip
     let frames: [PreparedFrame]
+    let schedule: FrameRunSchedule
+    init(clip: CursorClip, frames: [PreparedFrame]) {
+        self.clip = clip; self.frames = frames
+        schedule = FrameRunSchedule(frames.map { ObjectIdentifier($0.image) })
+    }
 }
 
 @MainActor

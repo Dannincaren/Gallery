@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil) }
+        store?.refreshDockVisibility()
         return true
     }
 }
@@ -106,7 +107,7 @@ private struct MenuContents: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Text(runtime.status)
-        Button("打开 Gallery") { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true) }
+        Button("打开 Gallery") { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true); store.refreshDockVisibility() }
         Button(runtime.enabled ? "停用并恢复光标" : "应用当前主题") {
             if runtime.enabled { runtime.stop() } else { store.applyCurrentTheme() }
         }

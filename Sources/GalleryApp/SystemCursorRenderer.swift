@@ -7,26 +7,30 @@ import GalleryNative
 @MainActor
 final class SystemCursorRenderer {
     private struct Key: Hashable {
-        let role: String, motion: Motion, frame: Int, scale: Int
+        let role: String, motion: Motion, image: ObjectIdentifier, scale: Int
     }
     private var cache: [Key: NSCursor] = [:]
     private var order: [Key] = []
-    private var submittedSeeds: [Int32] = []
+    private var submittedSeeds: [Int32: String] = [:]
+    private var seedOrder: [Int32] = []
     private var lastKey: Key?
     private var backgroundOwned = false
     private(set) var nextFrameDeadline: Double?
     private(set) var displayedFrame: Data?
     private(set) var size = CGSize.zero
     private(set) var submissions = 0
-    func owns(seed: Int32) -> Bool { seed >= 0 && submittedSeeds.contains(seed) }
+    // The same cached resource seed can reappear when another application
+    // selects a previously used role. A history hit alone is not ownership.
+    func owns(seed: Int32) -> Bool { seed >= 0 && lastKey != nil && submittedSeeds[seed] == lastKey?.role }
     func present(_ prepared: PreparedClip, role: String, motion: Motion, scale: Double,
                  started: Double, now: Double, staticOnly: Bool = false) {
         let clip = prepared.clip
         let step = max(0, Int((now - started) / clip.frameDuration))
         let index = staticOnly ? 0 : (motion.loops ? step % prepared.frames.count : min(step, prepared.frames.count - 1))
-        nextFrameDeadline = !staticOnly && prepared.frames.count > 1 && (motion.loops || index < prepared.frames.count - 1)
-            ? now + max(1.0 / 60, started + Double(step + 1) * clip.frameDuration - now) : nil
-        let key = Key(role: role, motion: motion, frame: index, scale: Int((scale * 100).rounded()))
+        nextFrameDeadline = staticOnly ? nil : prepared.schedule.nextChange(after: step, looping: motion.loops).map {
+            now + max(1.0 / 60, started + Double($0) * clip.frameDuration - now)
+        }
+        let key = Key(role: role, motion: motion, image: ObjectIdentifier(prepared.frames[index].image), scale: Int((scale * 100).rounded()))
         let geometry = clip.scaled(by: Double(key.scale) / 100)
         size = CGSize(width: geometry.width, height: geometry.height); displayedFrame = prepared.frames[index].data
         let seed = GLCursorBridge.cursorSeed()
@@ -48,8 +52,9 @@ final class SystemCursorRenderer {
         }
         let submitted = GLCursorBridge.present(cursor)
         if submitted >= 0 {
-            submittedSeeds.append(submitted)
-            if submittedSeeds.count > 256 { submittedSeeds.removeFirst(submittedSeeds.count - 256) }
+            if submittedSeeds[submitted] == nil { seedOrder.append(submitted) }
+            submittedSeeds[submitted] = role
+            if seedOrder.count > 256 { submittedSeeds.removeValue(forKey: seedOrder.removeFirst()) }
         }
         lastKey = key; submissions += 1
     }
@@ -64,6 +69,6 @@ final class SystemCursorRenderer {
                                   hotSpot: NSPoint(x: clip.hotX, y: clip.hotY))
             _ = GLCursorBridge.present(cursor)
         }
-        passThrough(); cache.removeAll(); order.removeAll(); submittedSeeds.removeAll()
+        passThrough(); cache.removeAll(); order.removeAll(); submittedSeeds.removeAll(); seedOrder.removeAll()
     }
 }
