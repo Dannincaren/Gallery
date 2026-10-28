@@ -24,11 +24,20 @@ final class GalleryStore: ObservableObject {
     private var pendingSave: DispatchWorkItem?
     private var revision = 0
     private var thumbnailJobs = Set<String>()
+    private var libraryRevision = 0
+    private var deletingTheme = false
+    private let trashThemeFile: (URL) throws -> URL
     private var subscriptions = Set<AnyCancellable>()
     private var pendingDockRefresh: DispatchWorkItem?
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
-    init(preview: Bool = false, rootURL: URL? = nil) {
+    init(preview: Bool = false, rootURL: URL? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+        self.trashThemeFile = trashThemeFile ?? { url in
+            var trashed: NSURL?
+            try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+            guard let result = trashed as URL? else { throw ThemeError.invalid("主题已移入废纸篓，但未能获取恢复位置。") }
+            return result
+        }
         self.preview = preview
         selectionDefaults = rootURL == nil && !preview
         root = rootURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Gallery")
@@ -72,7 +81,11 @@ final class GalleryStore: ObservableObject {
                 }.store(in: &subscriptions)
             }
         }
-        if preferences.applyAtLaunch && !runtime.hasRecovery { applyCurrentTheme() }
+        if preferences.applyAtLaunch && !runtime.hasRecovery {
+            let saved = selectionDefaults ? UserDefaults.standard.string(forKey: "lastAppliedThemeID") : nil
+            let target = saved.flatMap { id in library.contains(where: { $0.id == id }) ? id : nil } ?? selectedThemeID
+            selectTheme(target, activate: true)
+        }
     }
     func refreshDockVisibility() {
         guard selectionDefaults else { return }
@@ -89,10 +102,18 @@ final class GalleryStore: ObservableObject {
         let settled = DispatchWorkItem(block: apply); pendingDockRefresh = settled
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: settled)
     }
+    var activeThemeName: String? {
+        guard runtime.enabled, let activeThemeID else { return nil }
+        return library.first(where: { $0.id == activeThemeID })?.name
+    }
+    func isActiveTheme(_ id: String) -> Bool { runtime.enabled && activeThemeID == id }
     func applyCurrentTheme() {
-        guard runtime.stop() else { return }
+        guard !importing else { return }
+        saveNow(wait: true)
+        guard saveStatus == "已保存在本机", runtime.stop() else { return }
         runtime.setScale(preferences.pointerScale); runtime.start(theme)
         activeThemeID = runtime.enabled ? selectedThemeID : nil
+        if runtime.enabled && selectionDefaults { UserDefaults.standard.set(selectedThemeID, forKey: "lastAppliedThemeID") }
     }
     var visibleRoles: [CursorRole] {
         var seen = Set<String>()
@@ -177,7 +198,7 @@ final class GalleryStore: ObservableObject {
         pendingSave = task; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: task)
     }
     func saveNow(wait: Bool = false) {
-        guard !preview else { return }
+        guard !preview, !deletingTheme else { return }
         pendingSave?.cancel(); pendingSave = nil; refreshEntry(); revision += 1
         let version = revision, snapshot = theme, rows = library, id = selectedThemeID
         let destination = themeURL(id), root = self.root
@@ -224,11 +245,12 @@ final class GalleryStore: ObservableObject {
         guard !preview, let entry = library.first(where: { $0.id == id }), entry.roles.contains(where: { $0.thumbnail == nil }), !thumbnailJobs.contains(id) else { return }
         if id == selectedThemeID { saveNow(); return }
         thumbnailJobs.insert(id)
-        let url = themeURL(id)
+        let url = themeURL(id), capturedLibrary = libraryRevision
         saveQueue.async { [weak self] in
             let row = (try? ThemeFiles.load(url)).map { ThemeLibrary.thumbnails(id: id, theme: $0, previous: entry) }
             DispatchQueue.main.async {
                 guard let self else { return }; self.thumbnailJobs.remove(id)
+                guard capturedLibrary == self.libraryRevision, self.library.contains(where: { $0.id == id }) else { return }
                 if let row {
                     self.mergeThumbnails(row)
                     let rows = self.library, url = self.indexURL
@@ -237,8 +259,12 @@ final class GalleryStore: ObservableObject {
             }
         }
     }
-    func selectTheme(_ id: String, role: String? = nil) {
-        if id == selectedThemeID { if let role { selectedRole = role }; return }
+    func selectTheme(_ id: String, role: String? = nil, activate: Bool = false) {
+        guard !importing else { return }
+        if id == selectedThemeID {
+            if let role { selectedRole = role }
+            if activate { applyCurrentTheme() }; return
+        }
         guard !importing, library.contains(where: { $0.id == id }) else { return }
         saveNow(); importing = true
         let url = themeURL(id)
@@ -246,11 +272,15 @@ final class GalleryStore: ObservableObject {
             let result = Result { try ThemeFiles.load(url) }
             DispatchQueue.main.async {
                 guard let self else { return }; self.importing = false
+                // The save and load use the same serial queue; its save-result
+                // callback reaches the main queue before this callback.
+                guard self.saveStatus == "已保存在本机" else { return }
                 switch result {
                 case .success(let theme):
                     self.theme = theme; self.selectedThemeID = id
                     self.selectedRole = role ?? theme.roles[0].id; self.selectedMotion = .normal
                     if self.selectionDefaults { UserDefaults.standard.set(id, forKey: "currentThemeID") }
+                    if activate { self.applyCurrentTheme() }
                 case .failure(let error): self.message = error.localizedDescription
                 }
             }
@@ -264,30 +294,95 @@ final class GalleryStore: ObservableObject {
             DispatchQueue.main.async { completion(result) }
         }
     }
+    func deleteTheme(_ id: String) {
+        guard !preview, !importing, let removed = library.first(where: { $0.id == id }) else { return }
+        saveNow(wait: true)
+        guard saveStatus == "已保存在本机" else { return }
+        if isActiveTheme(id), !runtime.stop() { return }
+        if activeThemeID == id { activeThemeID = nil }
+        // Drain previous writes before taking the file out of the library.
+        // Invalidate delayed thumbnail callbacks so none can restore an old
+        // directory index after the deletion commits.
+        libraryRevision += 1; revision += 1; importing = true; deletingTheme = true
+        let previousRows = library, previousTheme = theme, previousID = selectedThemeID
+        let root = self.root, source = themeURL(id), trash = trashThemeFile
+        saveQueue.async { [weak self] in
+            let result = Result { () -> (GalleryTheme, String, [LibraryTheme]) in
+                var rows = previousRows.filter { $0.id != id }
+                let selected: String, next: GalleryTheme
+                if previousID != id { selected = previousID; next = previousTheme }
+                else if let first = rows.first {
+                    selected = first.id
+                    next = try ThemeFiles.load(root.appendingPathComponent("Themes/" + first.id + ".gallery"))
+                } else {
+                    next = Demo.makeTheme()
+                    let row = ThemeLibrary.thumbnails(id: UUID().uuidString, theme: next, previous: nil)
+                    selected = row.id; rows = [row]
+                }
+                let index = root.appendingPathComponent("themes.json"), compatibility = root.appendingPathComponent("current.gallery")
+                let oldIndex = try Data(contentsOf: index), oldCompatibility = try Data(contentsOf: compatibility)
+                let fallbackURL = root.appendingPathComponent("Themes/" + selected + ".gallery")
+                let createsFallback = !FileManager.default.fileExists(atPath: fallbackURL.path)
+                // Trash is recoverable through Finder. Keep its returned URL
+                // so a failed index write can also roll back the move.
+                let trashed = try trash(source)
+                do {
+                    if createsFallback { try ThemeFiles.save(next, to: fallbackURL) }
+                    try ThemeFiles.save(next, to: compatibility)
+                    try ThemeLibrary.saveIndex(rows, at: index)
+                } catch {
+                    try? oldIndex.write(to: index, options: .atomic)
+                    try? oldCompatibility.write(to: compatibility, options: .atomic)
+                    if createsFallback { try? FileManager.default.removeItem(at: fallbackURL) }
+                    do { try FileManager.default.moveItem(at: trashed, to: source) }
+                    catch { throw ThemeError.invalid("删除未完成，主题备份位于废纸篓：\(trashed.lastPathComponent)。请重新导入该文件。") }
+                    throw error
+                }
+                return (next, selected, rows)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }; self.deletingTheme = false; self.importing = false
+                switch result {
+                case .success(let (next, selected, rows)):
+                    self.library = rows; self.theme = next; self.selectedThemeID = selected
+                    if previousID == id { self.selectedRole = next.roles[0].id; self.selectedMotion = .normal }
+                    if self.selectionDefaults {
+                        UserDefaults.standard.set(selected, forKey: "currentThemeID")
+                        if UserDefaults.standard.string(forKey: "lastAppliedThemeID") == id { UserDefaults.standard.removeObject(forKey: "lastAppliedThemeID") }
+                    }
+                    self.saveStatus = "已保存在本机"
+                    self.message = "已删除「\(removed.name)」并移入废纸篓。需要找回时，可取出 .gallery 文件重新导入。"
+                case .failure(let error): self.message = error.localizedDescription
+                }
+            }
+        }
+    }
     private func installTheme(_ input: GalleryTheme) {
         saveNow()
         var theme = input
         let existing = Set(library.map(\.name)); var suffix = 2
         while existing.contains(theme.name) { theme.name = input.name + " (\(suffix))"; suffix += 1 }
         let row = LibraryTheme(theme: theme)
+        libraryRevision += 1
         library.append(row); self.theme = theme; selectedThemeID = row.id
         selectedRole = theme.roles[0].id; selectedMotion = .normal; changed()
     }
     func openTheme() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.item]; panel.allowsMultipleSelection = false
-        panel.message = "导入后会保存为独立主题目录。支持 .gallery、.cape、PRTS Windows ZIP 或 PRTS-Setup.exe。"; panel.prompt = "导入"
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.item]; panel.allowsMultipleSelection = false; panel.canChooseDirectories = true
+        panel.message = "导入后会保存为独立主题目录。支持主题文件、Windows 光标文件夹、INF、ZIP 和内嵌 CUR／ANI 的 .NET EXE。"; panel.prompt = "导入"
         guard panel.runModal() == .OK, let url = panel.url else { return }; importURL(url)
     }
     func importURL(_ url: URL) {
         guard !importing else { return }
         let ext = url.pathExtension.lowercased()
-        guard ["gallery", "cape", "zip", "exe"].contains(ext) else { message = "请选择 .gallery、.cape、PRTS Windows ZIP 或 PRTS-Setup.exe。"; return }
+        let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        guard directory || ["gallery", "cape", "zip", "exe", "inf"].contains(ext) else { message = "请选择主题文件、光标素材文件夹、INF、ZIP 或 EXE 安装器。"; return }
         importing = true; saveStatus = "正在导入主题…"
         let scoped = url.startAccessingSecurityScopedResource()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { () -> GalleryTheme in
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return ext == "gallery" || ext == "cape" ? try ThemeFiles.load(url) : try PRTSImport.load(url)
+                return !directory && (ext == "gallery" || ext == "cape") ? try ThemeFiles.load(url) : try WindowsThemeImport.load(url)
             }
             DispatchQueue.main.async {
                 guard let self else { return }; self.importing = false

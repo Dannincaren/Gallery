@@ -88,7 +88,8 @@ public struct WindowsResources {
             let nameOffset = try r.integer(p + 8, bytes: s)
             let external = try r.integer(p + 8 + s, bytes: implementation)
             let (name, _) = try r.string(strings + nameOffset, maximum: 512)
-            if external == 0, name.hasPrefix("PRTS-Replica-"), name.hasSuffix(".cur") || name.hasSuffix(".ani") {
+            let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
+            if external == 0, ["cur", "ani", "inf"].contains(ext) {
                 guard offset + 4 <= resourcesLength else { throw ThemeError.invalid("素材偏移越界。") }
                 let length = try r.u32(resources + offset)
                 guard length > 0, length <= 40_000_000, offset + 4 + length <= resourcesLength else { throw ThemeError.invalid("素材长度越界。") }
@@ -96,8 +97,11 @@ public struct WindowsResources {
             }
             p += 8 + s + implementation
         }
-        guard !found.isEmpty else { throw ThemeError.invalid("安装器没有可识别的 PRTS 光标资源。") }
+        guard !found.isEmpty else { throw ThemeError.invalid("安装器没有内嵌可直接读取的 CUR、ANI 或 INF 资源。") }
         self.data = data; self.entries = found
+    }
+    public func resource(named name: String) -> Data? {
+        entries[name].map { data.subdata(in: $0) }
     }
     public func resource(suffix: String) -> Data? {
         guard let name = entries.keys.sorted().first(where: { $0.hasSuffix("-" + suffix) }), let range = entries[name] else { return nil }

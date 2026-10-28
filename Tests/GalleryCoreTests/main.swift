@@ -22,6 +22,8 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("Windows INF mapping, actions and unclassified assets", imports.testWindowsINFMappingAndUnclassifiedAssets),
+    ("cursor folder import, common filenames and INF precedence", imports.testCursorDirectoryNamingAndINFPrecedence),
     ("material variants preserve edits and portable alternatives", imports.testVariantsPreserveEditsAndArchiveWithoutSourceFiles),
     ("normal loop survives brief cursor-region rebuilds", regression.testNormalLoopSurvivesBriefCursorRegionRebuilds),
     ("counter credits handle delayed callbacks, publication and wrap", regression.testCounterCreditsHandleBothPublicationOrdersAndWrap),
@@ -65,6 +67,9 @@ var checks: [(String, () throws -> Void)] = [
 if ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"] != nil {
     checks.append(("real PRTS resource extraction, ANI and cape conversion", imports.testRealPRTSOptionalIntegration))
 } else { print("SKIP real PRTS integration (set GALLERY_PRTS_EXE to a locally downloaded installer)") }
+if ProcessInfo.processInfo.environment["GALLERY_WINDOWS_EXE"] != nil {
+    checks.append(("real mon3tr EXE and ZIP preserve all embedded cursor assets", imports.testRealWindowsEXEOptionalIntegration))
+}
 for (name, check) in checks {
     do { try check(); print("PASS \(name)") }
     catch { print("FAIL \(name): \(error)"); exit(1) }

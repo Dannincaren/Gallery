@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import GalleryNative
 import GalleryCore
 
@@ -6,11 +7,23 @@ import GalleryCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: GalleryStore? { didSet { if let pendingURL { self.pendingURL = nil; store?.importURL(pendingURL) } } }
     private var pendingURL: URL?
+    private var pendingTermination: AnyCancellable?
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first else { return }
         if let store { store.importURL(url) } else { pendingURL = url }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let store, store.importing {
+            pendingTermination = store.$importing.filter { !$0 }.first().receive(on: DispatchQueue.main).sink { [weak self, weak store] _ in
+                MainActor.assumeIsolated {
+                    store?.saveNow(wait: true)
+                    let restored = store?.runtime.stop() != false
+                    self?.pendingTermination = nil
+                    sender.reply(toApplicationShouldTerminate: restored)
+                }
+            }
+            return .terminateLater
+        }
         store?.saveNow(wait: true)
         guard store?.runtime.stop() != false else { return .terminateCancel }
         return .terminateNow
@@ -28,7 +41,7 @@ struct GalleryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store: GalleryStore
     init() {
-        if let index = CommandLine.arguments.firstIndex(of: "--convert-prts"), CommandLine.arguments.count > index + 2 {
+        if let index = CommandLine.arguments.firstIndex(where: { ["--convert-prts", "--convert-windows"].contains($0) }), CommandLine.arguments.count > index + 2 {
             do {
                 let theme = try PRTSImport.load(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
                 try ThemeFiles.save(theme, to: URL(fileURLWithPath: CommandLine.arguments[index + 2]))

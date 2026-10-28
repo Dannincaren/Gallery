@@ -85,6 +85,33 @@ struct EditorHarness {
             let variantsSaved = try ThemeFiles.load(selectedURL)
             try verify(variantsSaved.roles[2].clip(.normal)?.hotY == 6 && variantsSaved.roles[2].variants["normal"]?.count == 2, "素材切换未保留编辑或未独立保存")
             print("PASS variant switching preserves aliases, edits, other roles and portable assets")
+            let trashRoot = root.appendingPathComponent("TestTrash")
+            try FileManager.default.createDirectory(at: trashRoot, withIntermediateDirectories: true)
+            let deleting = GalleryStore(rootURL: root, trashThemeFile: { input in
+                let output = trashRoot.appendingPathComponent(input.lastPathComponent)
+                try FileManager.default.moveItem(at: input, to: output); return output
+            })
+            let selectedBefore = deleting.selectedThemeID
+            let inactive = deleting.library.first { $0.id != selectedBefore }!.id
+            let inactiveURL = root.appendingPathComponent("Themes/" + inactive + ".gallery")
+            let inactiveBytes = try Data(contentsOf: inactiveURL)
+            deleting.deleteTheme(inactive); deleting.saveNow(wait: true); try waitFor(deleting)
+            try verify(deleting.library.count == 1 && deleting.selectedThemeID == selectedBefore, "删除其他主题改变了当前浏览主题")
+            try verify(!FileManager.default.fileExists(atPath: inactiveURL.path) &&
+                       (try Data(contentsOf: trashRoot.appendingPathComponent(inactive + ".gallery"))) == inactiveBytes, "删除没有保留完整可恢复文件")
+            let remaining = GalleryStore(rootURL: root); remaining.saveNow(wait: true)
+            try verify(remaining.library.count == 1 && !remaining.library.contains { $0.id == inactive }, "重新打开后被删除主题复活")
+            deleting.theme.name = "Last theme edits"; deleting.changed()
+            deleting.deleteTheme(selectedBefore); deleting.saveNow(wait: true); try waitFor(deleting)
+            try verify(deleting.library.count == 1 && deleting.selectedThemeID != selectedBefore, "删除最后主题未回到新的内置主题")
+            try verify(try ThemeFiles.load(trashRoot.appendingPathComponent(selectedBefore + ".gallery")).name == "Last theme edits", "删除前的待保存编辑丢失")
+            let finalIndex = try ThemeLibrary.loadIndex(at: root.appendingPathComponent("themes.json"))
+            try verify(finalIndex.map(\.id) == deleting.library.map(\.id), "延迟保存恢复了旧目录索引")
+            let denied = GalleryStore(rootURL: root, trashThemeFile: { _ in throw ThemeError.invalid("测试：无法移入废纸篓") })
+            let protectedID = denied.selectedThemeID
+            denied.deleteTheme(protectedID); try waitFor(denied)
+            try verify(denied.library == finalIndex && FileManager.default.fileExists(atPath: root.appendingPathComponent("Themes/" + protectedID + ".gallery").path), "删除失败丢失了主题或目录")
+            print("PASS recoverable whole-theme deletion, pending saves, last-theme fallback and failed-trash isolation")
             print("Editor checks passed; no user library or login settings changed")
         } catch { print("FAIL:", error.localizedDescription); exit(1) }
     }

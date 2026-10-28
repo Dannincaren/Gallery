@@ -5,148 +5,32 @@ struct GalleryEditor: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
     @ObservedObject var preferences: AppPreferences
+    @Environment(\.colorScheme) private var colorScheme
     @State private var playing = true
     @State private var selectedFrame = 0
     @State private var previewStart = Date()
     @State private var showSettings = false
     @State private var showImport = false
     @State private var showRoleSource = false
+    @State private var themeToDelete: LibraryTheme?
     @State private var expandedThemes = Set<String>()
     @State private var editorActive = NSApp.isActive
     @State private var editorVisible = true
     init(store: GalleryStore) { self.store = store; self.runtime = store.runtime; self.preferences = store.preferences }
     var body: some View {
         NavigationSplitView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.primary)
-                    VStack(alignment: .leading) {
-                        Text("Gallery").font(.title2.bold())
-                        Text("让指针有自己的节奏").font(.caption).foregroundStyle(.secondary)
-                    }
-                }.padding(.horizontal, 14).padding(.top, 18)
-                TextField("主题名称", text: $store.theme.name).font(.headline).textFieldStyle(.roundedBorder)
-                    .disabled(runtime.enabled).padding(.horizontal, 14)
-                    .onChange(of: store.theme.name) { _, _ in store.changed() }
-                List {
-                    Section("主题目录") {
-                        ForEach(store.library) { folder in
-                            DisclosureGroup(isExpanded: Binding(get: { expandedThemes.contains(folder.id) }, set: { open in
-                                if open { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) } else { expandedThemes.remove(folder.id) }
-                            })) {
-                                ForEach(folder.roles) { role in
-                                    Button {
-                                        store.selectTheme(folder.id, role: role.id)
-                                    } label: {
-                                        HStack(spacing: 9) {
-                                            if let thumbnail = role.thumbnail, let image = EditorImageCache.image(thumbnail) {
-                                                Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
-                                            } else {
-                                                Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 25, height: 25)
-                                            }
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text(role.name).font(.callout)
-                                                Text(role.usesNative ? "系统原有" : (CursorCatalog.assetOnly(role.id) ? "应用自定义 · 可编辑素材" : "\(role.motionCount) 个动画状态"))
-                                                    .font(.caption2).foregroundStyle(.secondary)
-                                            }
-                                            Spacer(minLength: 0)
-                                        }.padding(.vertical, 4).padding(.horizontal, 5)
-                                            .contentShape(Rectangle())
-                                            .background(store.selectedThemeID == folder.id && store.selectedRole == role.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                                    }.buttonStyle(.plain)
-                                }
-                            } label: {
-                                Button {
-                                    if expandedThemes.contains(folder.id) { expandedThemes.remove(folder.id) }
-                                    else { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) }
-                                    store.selectTheme(folder.id)
-                                } label: {
-                                    Label(folder.name, systemImage: "folder").font(.headline).lineLimit(2)
-                                }.buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }.listStyle(.sidebar)
-                Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
-                    .buttonStyle(.plain).padding(16)
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+            sidebar
         } detail: {
-            VStack(spacing: 0) {
-                statusBar
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(store.roleIndex.map { store.theme.roles[$0].name } ?? "光标").font(.largeTitle.bold())
-                                Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("导入主题…") { showImport = true }
-                            if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
-                            if runtime.enabled && store.activeThemeID != store.selectedThemeID { Button("应用此主题") { store.applyCurrentTheme() } }
-                        }
-                        HStack(spacing: 12) {
-                            NumericSlider(title: "全局大小", value: Binding(get: { preferences.pointerScale }, set: {
-                                preferences.pointerScale = $0; runtime.setScale($0)
-                            }), range: 50...300, unit: "%", multiplier: 100)
-                            Button("还原") { preferences.pointerScale = 1; runtime.setScale(1) }
-                            Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
-                        }
-                        if store.importing {
-                            HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
-                        }
-                        if let index = store.roleIndex {
-                            roleControls(store.theme.roles[index])
-                            Text(store.theme.roles[index].splitClickAnimation
-                                 ? "已添加按住动画：按住时持续播放，松开时播放松手动画。"
-                                 : "未添加按住动画：点击后自动连播按下与松手动画。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Picker("动画状态", selection: $store.selectedMotion) {
-                            ForEach(Motion.allCases) { Text($0.title).tag($0) }
-                        }.pickerStyle(.segmented)
-                        if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
-                        if let index = store.roleIndex { variantControls(store.theme.roles[index]) }
-                        if let clip = store.clip {
-                            clipEditor(clip)
-                        } else {
-                            ContentUnavailableView {
-                                Label("尚未设置\(store.selectedMotion.title)动画", systemImage: "film.stack")
-                            } description: {
-                                Text("可以复制常态开始编辑，或直接导入动画文件。未设置时使用常态光标。")
-                            } actions: {
-                                Button("从常态复制") { store.createClip() }
-                                Button("导入动画") { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
-                            }.frame(minHeight: 360).disabled(runtime.enabled)
-                        }
-                    }.padding(28)
-                }
-                HStack {
-                    Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
-                    Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Gallery \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
-                }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
-            }
+            editorDetail
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button { showImport = true } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
-                Menu {
-                    Button("从 PRTS Windows 包导入交互动画…") { store.importPRTS() }
-                    Button("导出 Gallery 主题…") { store.exportTheme() }
-                    Button("导出常态 Mousecape 主题…") { store.exportTheme(cape: true) }
-                    Divider()
-                    Button("载入内置示例") { store.resetDemo() }
-                } label: { Label("主题", systemImage: "ellipsis.circle") }
-                Button {
-                    if runtime.enabled { runtime.stop() } else { store.saveNow(); store.applyCurrentTheme() }
-                } label: {
-                    Label(runtime.enabled ? "停用并恢复" : "应用主题", systemImage: runtime.enabled ? "pause.circle.fill" : "play.circle.fill")
-                }.tint(runtime.enabled ? .orange : .blue)
+        .toolbar { themeToolbar }
+        .confirmationDialog("删除整个主题？", isPresented: deletionPresented, titleVisibility: .visible) {
+            if let folder = themeToDelete {
+                Button("移入废纸篓", role: .destructive) { store.deleteTheme(folder.id); themeToDelete = nil }
             }
-        }
+            Button("取消", role: .cancel) { themeToDelete = nil }
+        } message: { Text(deletionMessage) }
+        .disabled(store.importing)
         .sheet(isPresented: $showSettings) { InteractionSettings(store: store, runtime: runtime) }
         .sheet(isPresented: $showImport) { ImportThemePanel(store: store) }
         .dropDestination(for: URL.self) { urls, _ in
@@ -166,6 +50,198 @@ struct GalleryEditor: View {
         .sheet(isPresented: $showRoleSource) { RoleSourcePicker(store: store) }
         .frame(minWidth: 960, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+    private var editorDetail: some View {
+        VStack(spacing: 0) {
+            statusBar
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(store.roleIndex.map { store.theme.roles[$0].name } ?? "光标").font(.largeTitle.bold())
+                            Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("导入主题…") { showImport = true }
+                        if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
+
+                    }
+                    HStack(spacing: 12) {
+                        NumericSlider(title: "全局大小", value: Binding(get: { preferences.pointerScale }, set: {
+                            preferences.pointerScale = $0; runtime.setScale($0)
+                        }), range: 50...300, unit: "%", multiplier: 100)
+                        Button("还原") { preferences.pointerScale = 1; runtime.setScale(1) }
+                        Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if store.importing {
+                        HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
+                    }
+                    if let index = store.roleIndex {
+                        roleControls(store.theme.roles[index])
+                        Text(store.theme.roles[index].splitClickAnimation
+                             ? "已添加按住动画：按住时持续播放，松开时播放松手动画。"
+                             : "未添加按住动画：点击后自动连播按下与松手动画。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("动画状态", selection: $store.selectedMotion) {
+                        ForEach(Motion.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented)
+                    if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
+                    if let index = store.roleIndex { variantControls(store.theme.roles[index]) }
+                    if let clip = store.clip {
+                        clipEditor(clip)
+                    } else {
+                        ContentUnavailableView {
+                            Label("尚未设置\(store.selectedMotion.title)动画", systemImage: "film.stack")
+                        } description: {
+                            Text("可以复制常态开始编辑，或直接导入动画文件。未设置时使用常态光标。")
+                        } actions: {
+                            Button("从常态复制") { store.createClip() }
+                            Button("导入动画") { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
+                        }.frame(minHeight: 360).disabled(runtime.enabled)
+                    }
+                }.padding(28)
+            }
+            HStack {
+                Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
+                Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("Gallery \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+            }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
+        }
+    }
+    private var themeToolbar: some ToolbarContent {
+        ToolbarItemGroup {
+            Button { showImport = true } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
+            Menu {
+                Button("从 Windows 光标安装包导入…") { store.importPRTS() }
+                Button("导出 Gallery 主题…") { store.exportTheme() }
+                Button("导出常态 Mousecape 主题…") { store.exportTheme(cape: true) }
+                Divider()
+                Button("载入内置示例") { store.resetDemo() }
+                Divider()
+                Button("删除当前浏览的整个主题…", role: .destructive) {
+                    themeToDelete = store.library.first(where: { $0.id == store.selectedThemeID })
+                }
+            } label: { Label("主题", systemImage: "ellipsis.circle") }
+            if !store.isActiveTheme(store.selectedThemeID) {
+                Button { store.applyCurrentTheme() } label: {
+                    Label(runtime.enabled ? "切换到此主题" : "使用此主题", systemImage: "play.circle.fill")
+                }.tint(.blue).help("使用正在浏览的「\(store.theme.name)」")
+            }
+            if runtime.enabled {
+                Button { runtime.stop() } label: { Label("停用并恢复", systemImage: "pause.circle.fill") }.tint(.orange)
+            }
+        }
+    }
+    private var deletionPresented: Binding<Bool> {
+        Binding(get: { themeToDelete != nil }, set: { if !$0 { themeToDelete = nil } })
+    }
+    private var deletionMessage: String {
+        guard let folder = themeToDelete else { return "" }
+        var text = "将删除「\(folder.name)」的全部角色与动画。"
+        if store.isActiveTheme(folder.id) { text += "该主题正在使用，会先停用并恢复光标。" }
+        text += "原始安装包不受影响；主题文件可从废纸篓找回。"
+        if store.library.count == 1 { text += "删除后回到内置主题。" }
+        return text
+    }
+    private var sidebarText: Color { colorScheme == .dark ? .white : .black }
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.primary)
+                VStack(alignment: .leading) {
+                    Text("Gallery").font(.title2.bold())
+                    Text("让指针有自己的节奏").font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(.horizontal, 14).padding(.top, 18)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("正在浏览的主题").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(role: .destructive) { themeToDelete = store.library.first { $0.id == store.selectedThemeID } } label: {
+                        Image(systemName: "trash")
+                    }.buttonStyle(.plain).help("删除当前浏览的整个主题")
+                }
+                TextField("主题名称", text: $store.theme.name).font(.headline).textFieldStyle(.roundedBorder)
+                    .disabled(runtime.enabled)
+                    .onChange(of: store.theme.name) { _, _ in store.changed() }
+            }.padding(.horizontal, 14)
+            List {
+                Section {
+                    ForEach(store.library) { folder in
+                        themeRow(folder)
+                    }
+                } header: { Text("主题目录").foregroundStyle(sidebarText.opacity(0.65)) }
+            }.listStyle(.sidebar).foregroundStyle(.primary)
+            Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
+                .buttonStyle(.plain).padding(16)
+        }
+        .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+    }
+    private func themeRow(_ folder: LibraryTheme) -> some View {
+        DisclosureGroup(isExpanded: Binding(get: { expandedThemes.contains(folder.id) }, set: { open in
+            if open { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) } else { expandedThemes.remove(folder.id) }
+        })) {
+            ForEach(folder.roles) { role in
+                Button {
+                    store.selectTheme(folder.id, role: role.id)
+                } label: {
+                    HStack(spacing: 9) {
+                        if let thumbnail = role.thumbnail, let image = EditorImageCache.image(thumbnail) {
+                            Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
+                        } else {
+                            Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 25, height: 25)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(role.name).font(.callout).foregroundStyle(sidebarText)
+                            Text(roleSubtitle(role))
+                                .font(.caption2).foregroundStyle(sidebarText.opacity(0.65))
+                        }
+                        Spacer(minLength: 0)
+                    }.padding(.vertical, 4).padding(.horizontal, 5)
+                        .contentShape(Rectangle())
+                        .background(store.selectedThemeID == folder.id && store.selectedRole == role.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                }.buttonStyle(.plain)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Button {
+                    expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id)
+                    store.selectTheme(folder.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(folder.name, systemImage: "folder").font(.headline).foregroundStyle(sidebarText).lineLimit(2)
+                        HStack(spacing: 5) {
+                            if store.isActiveTheme(folder.id) {
+                                Text("正在使用").foregroundStyle(.green)
+                            }
+                            if store.selectedThemeID == folder.id {
+                                Text("浏览中").foregroundStyle(Color.accentColor)
+                            }
+                        }.font(.caption2.weight(.medium))
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).help("浏览主题与角色；点击「使用」才会切换实际光标。")
+                if !store.isActiveTheme(folder.id) {
+                    Button("使用") { store.selectTheme(folder.id, activate: true) }
+                        .controlSize(.mini).buttonStyle(.bordered)
+                        .help("切换实际光标为「\(folder.name)」")
+                }
+            }
+        }
+        .contextMenu {
+            Button("使用此主题") { store.selectTheme(folder.id, activate: true) }
+                .disabled(store.isActiveTheme(folder.id))
+            Button("浏览主题") { store.selectTheme(folder.id) }
+            Divider()
+            Button("删除整个主题…", role: .destructive) { themeToDelete = folder }
+        }
+    }
+    private func roleSubtitle(_ role: LibraryRole) -> String {
+        if role.usesNative { return "系统原有" }
+        if role.id.hasPrefix("com.apple.gallery.Imported.") { return "未分类素材 · 可混用" }
+        if CursorCatalog.assetOnly(role.id) { return "应用自定义 · 可编辑素材" }
+        return "\(role.motionCount) 个动画状态"
     }
     private func idleTiming(_ role: CursorRole) -> some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -209,7 +285,14 @@ struct GalleryEditor: View {
     private var statusBar: some View {
         HStack(spacing: 9) {
             Image(systemName: runtime.enabled ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(runtime.enabled ? .green : .secondary)
-            Text(runtime.status).font(.callout)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(store.activeThemeName.map { "正在使用：" + $0 } ?? (runtime.enabled ? "自定义光标已启用" : "自定义光标已停用"))
+                    .font(.callout.weight(.semibold))
+                Text(runtime.status).font(.caption).foregroundStyle(.secondary)
+            }
+            if runtime.enabled && !store.isActiveTheme(store.selectedThemeID) {
+                Text("浏览：\(store.theme.name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer()
             if runtime.hasRecovery && !runtime.enabled { Button("恢复上次光标") { runtime.recover() } }
         }.padding(.horizontal, 24).padding(.vertical, 13).background(.quaternary.opacity(0.35))
@@ -348,12 +431,12 @@ private struct ImportThemePanel: View {
             }
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("原版 PRTS Windows 安装包", systemImage: "shippingbox").font(.headline)
-                    Text("直接选择下载的完整 ZIP；也可以选择解压后「程序文件」中的 PRTS-Setup.exe。无需安装或运行 Windows 程序。")
+                    Label("Windows 光标安装包", systemImage: "shippingbox").font(.headline)
+                    Text("选择内嵌 CUR／ANI 的 .NET EXE（支持 PRTS、mon3tr 这类安装器），或选择包含光标和安装 INF 的文件夹、ZIP。也可直接选 INF。Gallery 直接读取素材，不运行安装程序。")
                         .font(.callout).foregroundStyle(.secondary)
                     Text("静态、动态等可选版本会一并保留。旧版主题需重新导入原包，或在角色页「添加其他版本」。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("注意：PRTS-Install.exe 只是安装入口，不含动画。")
+                    Text("不同 EXE 的打包方式可能不同，无法直接解析时请使用光标 ZIP。PRTS 请选 PRTS-Setup.exe，避免只选安装入口。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
             }

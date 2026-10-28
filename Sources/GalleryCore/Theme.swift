@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Motion: String, Codable, CaseIterable, Identifiable {
+public enum Motion: String, Codable, CaseIterable, Identifiable, Sendable {
     case normal, idle, press, hold, release
     public var id: String { rawValue }
     public var title: String {
@@ -15,7 +15,7 @@ public enum Motion: String, Codable, CaseIterable, Identifiable {
     public var loops: Bool { self == .normal || self == .idle || self == .hold }
 }
 
-public struct CursorClip: Codable, Equatable {
+public struct CursorClip: Codable, Equatable, Sendable {
     public var frames: [Data]
     public var frameDuration: Double
     public var width: Double
@@ -64,14 +64,14 @@ public struct CursorClip: Codable, Equatable {
     }
 }
 
-public struct CursorVariant: Codable, Equatable, Identifiable {
+public struct CursorVariant: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var clip: CursorClip
     public init(id: String, name: String, clip: CursorClip) { self.id = id; self.name = name; self.clip = clip }
 }
 
-public struct CursorRole: Codable, Equatable, Identifiable {
+public struct CursorRole: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var clips: [String: CursorClip]
@@ -136,7 +136,7 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     }
 }
 
-public struct GalleryTheme: Codable, Equatable {
+public struct GalleryTheme: Codable, Equatable, Sendable {
     public var formatVersion = 1
     public var name: String
     public var author: String

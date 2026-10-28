@@ -2,6 +2,106 @@ import AppKit
 import GalleryCore
 
 final class ImportTests {
+    func testWindowsINFMappingAndUnclassifiedAssets() throws {
+        let png = try frame(.red)
+        var cur = Data([0, 0, 2, 0, 1, 0, 12, 12, 0, 0, 3, 0, 4, 0])
+        for n in [png.count, 22] { cur.append(contentsOf: (0..<4).map { UInt8((n >> ($0 * 8)) & 255) }) }
+        cur.append(png)
+        let inf = """
+        [Any.Reg]
+        HKCU,"Control Panel\\Cursors",Arrow,0x00020000,"%10%\\%CUR_DIR%\\%pointer%"
+        HKCU,"Control Panel\\Cursors",SizeNWSE,0x00020000,"%diag%"
+        [Strings]
+        SCHEME_NAME = "测试方案"
+        pointer = "CustomPointer.CUR"
+        diag = "Slope.cur"
+        CUR_DIR = "Cursors\\Test"
+        """
+        let files = ["payload/CustomPointer.CUR": cur, "Slope.cur": cur, "Sparkle.cur": cur,
+                     "payload/CustomPointer_hold.cur": cur, "install.inf": inf.data(using: .utf16)!]
+        let theme = try WindowsThemeImport.theme(files: files, name: "Fallback")
+        expectEqual(theme.name, "测试方案")
+        let arrow = try require(theme.roles.first { $0.id == "com.apple.coregraphics.Arrow" })
+        expectEqual(arrow.clip(.normal)?.hotX, 3)
+        expectNotNil(arrow.clip(.hold))
+        expectNotNil(theme.roles.first { $0.id == "com.apple.cursor.35" })
+        expectFalse(theme.roles.contains { $0.id == "com.apple.cursor.29" })
+        expectEqual(theme.roles.filter { CursorCatalog.assetOnly($0.id) }.map(\.name), ["Sparkle.cur"])
+        expectThrows(try WindowsThemeImport.theme(files: ["Sparkle.cur": cur, "install.inf": inf.data(using: .utf8)!], name: "Missing"))
+        let explosive = "[Reg]\nHKCU,\"Control Panel\\Cursors\",Arrow,0,\"%a%\"\n[Strings]\na=\"" + String(repeating: "%b%", count: 500) + "\"\nb=\"" + String(repeating: "x", count: 500) + "\""
+        expectThrows(try WindowsThemeImport.theme(files: ["Sparkle.cur": cur, "install.inf": Data(explosive.utf8)], name: "Invalid"))
+    }
+    func testCursorDirectoryNamingAndINFPrecedence() throws {
+        let png = try frame(.blue)
+        var cur = Data([0, 0, 2, 0, 1, 0, 12, 12, 0, 0, 2, 0, 5, 0])
+        for n in [png.count, 22] { cur.append(contentsOf: (0..<4).map { UInt8((n >> ($0 * 8)) & 255) }) }; cur.append(png)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for file in ["pointer.cur", "text.cur", "vert.cur", "horz.cur", "dgn1.cur", "dgn2.cur"] { try cur.write(to: root.appendingPathComponent(file)) }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("outside.cur"), withDestinationURL: root.deletingLastPathComponent().appendingPathComponent("not-a-cursor"))
+        let folder = try WindowsThemeImport.load(root)
+        for id in ["com.apple.coregraphics.Arrow", "com.apple.coregraphics.IBeam", "com.apple.cursor.23", "com.apple.cursor.19", "com.apple.cursor.35", "com.apple.cursor.29"] {
+            expectNotNil(folder.roles.first { $0.id == id })
+        }
+        expectFalse(folder.roles.contains { CursorCatalog.assetOnly($0.id) })
+        let special = root.appendingPathComponent("pointer[1].cur")
+        try cur.write(to: special)
+        let zip = root.appendingPathComponent("Special.zip"), zipper = Process()
+        zipper.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zipper.arguments = ["-j", zip.path, special.path]; zipper.standardOutput = FileHandle.nullDevice; zipper.standardError = FileHandle.nullDevice
+        try zipper.run(); zipper.waitUntilExit()
+        expectEqual(zipper.terminationStatus, 0)
+        let literalZIP = try WindowsThemeImport.load(zip)
+        expectEqual(literalZIP.roles.map(\.name), ["pointer[1].cur"])
+
+        let inf = "[Reg]\nHKCU,\"Control Panel\\Cursors\",SizeNWSE,0,\"dgn2.cur\""
+        let configured = try WindowsThemeImport.theme(files: ["dgn2.cur": cur, "配置.inf": Data(inf.utf8)], name: "Configuration wins")
+        expectNotNil(configured.roles.first { $0.id == "com.apple.cursor.35" })
+        expectFalse(configured.roles.contains { $0.id == "com.apple.cursor.29" })
+    }
+    func testRealWindowsEXEOptionalIntegration() throws {
+        guard let path = ProcessInfo.processInfo.environment["GALLERY_WINDOWS_EXE"] else { return }
+        let input = URL(fileURLWithPath: path)
+        let resources = try WindowsResources(data: Data(contentsOf: input))
+        let assets = Set(resources.entries.keys.filter { $0.lowercased().hasSuffix(".ani") || $0.lowercased().hasSuffix(".cur") })
+        expectEqual(assets.count, 17)
+        let theme = try WindowsThemeImport.load(input)
+        expectEqual(theme.name, "mon3tr鼠标")
+        let imported = Set(theme.roles.flatMap { $0.variants.values.flatMap { $0.map(\.id) } })
+        expectEqual(imported, assets)
+        for role in theme.roles {
+            for variants in role.variants.values {
+                for variant in variants {
+                    let decoded = try AnimationImport.read(try require(resources.resource(named: variant.id)), extension: "ani")
+                    expectEqual(variant.clip, decoded)
+                }
+            }
+        }
+        expectFalse(theme.roles.contains { $0.clip(.press) != nil || $0.clip(.release) != nil })
+        expectEqual(theme.roles.first { $0.id == "com.apple.cursor.35" }?.selectedVariants["normal"], ".InstallCache/Diagonal1.ani")
+        expectEqual(theme.roles.first { $0.id == "com.apple.cursor.29" }?.selectedVariants["normal"], ".InstallCache/Diagonal2.ani")
+        let archive = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gallery")
+        defer { try? FileManager.default.removeItem(at: archive) }
+        try ThemeFiles.save(theme, to: archive); expectEqual(try ThemeFiles.load(archive), theme)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for asset in resources.entries.keys {
+            let filename = URL(fileURLWithPath: asset).lastPathComponent
+            try resources.resource(named: asset)!.write(to: directory.appendingPathComponent(filename))
+        }
+        let fromFolder = try WindowsThemeImport.load(directory)
+        expectEqual(fromFolder.name, theme.name)
+        expectEqual(fromFolder.roles.map(\.clips), theme.roles.map(\.clips))
+        let fromINF = try WindowsThemeImport.load(directory.appendingPathComponent("install.inf"))
+        expectEqual(fromINF, fromFolder)
+        if let zip = ProcessInfo.processInfo.environment["GALLERY_WINDOWS_ZIP"] {
+            let zipped = try WindowsThemeImport.load(URL(fileURLWithPath: zip))
+            expectEqual(zipped.name, theme.name)
+            expectEqual(zipped.roles.map(\.clips), theme.roles.map(\.clips))
+        }
+    }
     func frame(_ color: NSColor) throws -> Data {
         let context = CGContext(data: nil, width: 12, height: 12, bitsPerComponent: 8, bytesPerRow: 48,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
