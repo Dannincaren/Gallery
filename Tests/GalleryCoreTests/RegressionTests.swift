@@ -3,6 +3,50 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testResizeCornerHysteresis() {
+        var latch = ResizeCornerLatch()
+        expectFalse(latch.update(rightDistance: 8, bottomDistance: 8))
+        expectEqual(latch.update(rightDistance: 4, bottomDistance: 4), true)
+        expectEqual(latch.update(rightDistance: 9, bottomDistance: 9), true)
+        expectFalse(latch.update(rightDistance: 13, bottomDistance: 9))
+        expectFalse(latch.update(rightDistance: 8, bottomDistance: 8))
+    }
+    func testRoleFamiliesIgnoreNamesAndSeparateSizes() {
+        expectEqual(CursorCatalog.family("com.apple.cursor.17"), CursorCatalog.family("com.apple.cursor.19"))
+        expectFalse(CursorCatalog.family("com.apple.cursor.19") == CursorCatalog.family("com.apple.cursor.23"))
+        expectFalse(CursorCatalog.family("com.apple.cursor.19") == CursorCatalog.family("com.apple.cursor.13"))
+        expectEqual(CursorCatalog.family("com.apple.coregraphics.ArrowS"), CursorCatalog.family("com.apple.cursor.0"))
+    }
+    func testDeliberateShakeAndRecovery() {
+        var shake = PointerShake()
+        for (i, x) in [0.0, 70, -70, 70, -70].enumerated() { shake.observe(x: x, y: 0, at: Double(i) * 0.05) }
+        expectGreater(shake.scale(at: 0.25), 1.5)
+        expectEqual(shake.scale(at: 1), 1)
+        expectEqual(shake.nextDeadline(at: 1), nil)
+        shake.reset()
+        for i in 0..<40 { shake.observe(x: Double(i) * 80, y: 0, at: Double(i) * 0.04) }
+        expectEqual(shake.scale(at: 1.6), 1)
+        for i in 0..<6 { shake.observe(x: i % 2 == 0 ? 70 : -70, y: 0, at: 2 + Double(i)) }
+        expectEqual(shake.scale(at: 7), 1)
+    }
+    func testPersistedThumbnailCacheAndLegacyIndex() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)])
+        let role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])
+        let theme = GalleryTheme(name: "Cached", roles: [role]), id = UUID().uuidString
+        let legacy = LibraryTheme(id: id, theme: theme)
+        let decoded = try JSONDecoder().decode(LibraryTheme.self, from: JSONEncoder().encode(legacy))
+        expectEqual(decoded.roles[0].thumbnail, nil)
+        let cached = ThemeLibrary.thumbnails(id: id, theme: theme, previous: legacy)
+        let image = try CursorImages.bitmap(require(cached.roles[0].thumbnail))
+        expectFalse(image.width > 64 || image.height > 64)
+        expectNotNil(cached.roles[0].thumbnailKey)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: cached), cached)
+        var changed = theme; changed.roles[0].clips["normal"]!.frames = [try ImportTests().frame(.blue)]
+        let refreshed = ThemeLibrary.thumbnails(id: id, theme: changed, previous: cached)
+        expectFalse(refreshed.roles[0].thumbnailKey == cached.roles[0].thumbnailKey)
+        let archive = try JSONEncoder().encode(cached)
+        expectEqual(try JSONDecoder().decode(LibraryTheme.self, from: archive), cached)
+    }
     func testDuplicateFrameOrderAndLimit() throws {
         let red = try ImportTests().frame(.red), blue = try ImportTests().frame(.blue)
         var clip = CursorClip(frames: [red, blue])

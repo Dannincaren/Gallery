@@ -32,14 +32,18 @@ struct GalleryEditor: View {
                     Section("主题目录") {
                         ForEach(store.library) { folder in
                             DisclosureGroup(isExpanded: Binding(get: { expandedThemes.contains(folder.id) }, set: { open in
-                                if open { expandedThemes.insert(folder.id) } else { expandedThemes.remove(folder.id) }
+                                if open { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) } else { expandedThemes.remove(folder.id) }
                             })) {
                                 ForEach(folder.roles) { role in
                                     Button {
                                         store.selectTheme(folder.id, role: role.id)
                                     } label: {
                                         HStack(spacing: 9) {
-                                            Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 20)
+                                            if let thumbnail = role.thumbnail, let image = EditorImageCache.image(thumbnail) {
+                                                Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
+                                            } else {
+                                                Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 25, height: 25)
+                                            }
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text(role.name).font(.callout)
                                                 Text(role.usesNative ? "系统原有" : (CursorCatalog.assetOnly(role.id) ? "应用自定义 · 可编辑素材" : "\(role.motionCount) 个动画状态"))
@@ -54,7 +58,7 @@ struct GalleryEditor: View {
                             } label: {
                                 Button {
                                     if expandedThemes.contains(folder.id) { expandedThemes.remove(folder.id) }
-                                    else { expandedThemes.insert(folder.id) }
+                                    else { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) }
                                     store.selectTheme(folder.id)
                                 } label: {
                                     Label(folder.name, systemImage: "folder").font(.headline).lineLimit(2)
@@ -126,7 +130,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.4 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.5 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
@@ -188,9 +192,11 @@ struct GalleryEditor: View {
                 }.frame(minWidth: 320, minHeight: 300).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
                 HStack {
                     Button { playing.toggle(); previewStart = Date() } label: {
-                        Label(playing ? "暂停预览" : "播放预览", systemImage: playing ? "pause.fill" : "play.fill")
-                    }
-                    Button { previewStart = Date(); playing = true } label: { Image(systemName: "backward.end.fill") }.help("重新播放")
+                        Label(runtime.enabled ? "预览已暂停" : (clip.frames.count < 2 ? "静态预览" : (playing ? "暂停预览" : "播放预览")), systemImage: playing ? "pause.fill" : "play.fill")
+                    }.disabled(runtime.enabled || clip.frames.count < 2)
+                        .help(runtime.enabled ? "先暂停自定义主题，再播放编辑器预览。" : "播放或暂停预览")
+                    Button { previewStart = Date(); playing = true } label: { Image(systemName: "backward.end.fill") }
+                        .help("重新播放").disabled(runtime.enabled || clip.frames.count < 2)
                     Spacer()
                     Text("\(clip.frames.count) 帧 · \(clip.duration, specifier: "%.2f") 秒").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
@@ -257,10 +263,10 @@ struct GalleryEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Text("此角色大小")
-                Slider(value: Binding(get: { role.scale }, set: { store.setRoleScale($0) }), in: 0.5...3)
+                Slider(value: Binding(get: { role.scale }, set: { store.setRoleScale($0, for: role.id) }), in: 0.5...3)
                     .frame(maxWidth: 250).disabled(role.usesNative)
                 Text("\(Int((role.scale * 100).rounded()))%") .monospacedDigit().frame(width: 48)
-                Button("还原") { store.setRoleScale(1) }.disabled(role.usesNative)
+                Button("还原") { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
                 Text("叠加在全局大小之上").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
@@ -381,10 +387,15 @@ private struct InteractionSettings: View {
                         }.font(.caption)
                     }
                     Toggle("启动后自动应用当前主题", isOn: $preferences.applyAtLaunch)
+                    Toggle("启用主题时隐藏 Dock 图标", isOn: $preferences.hideDockIconWhileRunning)
+                    Text("隐藏后可从菜单栏重新打开 Gallery；停用主题后恢复 Dock 图标。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("请将应用放入「应用程序」后开启。存在待恢复记录时不会自动应用。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
             }
+            Toggle("快速甩动鼠标时放大主题光标", isOn: $preferences.shakeToLocate)
+                .help("连续快速往返甩动时临时放大，随后恢复。此开关控制 Gallery 的放大效果，系统自带的定位鼠标设置独立生效。")
             Form {
                 Section("交互动画") {
                     Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)

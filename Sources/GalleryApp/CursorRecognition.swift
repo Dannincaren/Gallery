@@ -10,6 +10,7 @@ final class CursorRecognition: @unchecked Sendable {
     private var cache: [Int32: CursorIdentification] = [:]
     private var cachedAt: [Int32: Double] = [:]
     private var order: [Int32] = []
+    private var captureMisses: [Int32: (Double, Int)] = [:]
     init(matcher: CursorMatcher) { self.matcher = matcher }
     func probe(_ completion: @escaping @Sendable (Int32, CursorIdentification?) -> Void) {
         queue.async { [self] in
@@ -21,10 +22,16 @@ final class CursorRecognition: @unchecked Sendable {
                 }
                 guard let snapshot = GLCursorBridge.currentSnapshot() else {
                     if seed >= 0, seed == GLCursorBridge.cursorSeed() {
-                        remember(.unknown, seed: seed, now: now); completion(seed, .unknown)
+                        let previous = captureMisses[seed] ?? (now, 0)
+                        captureMisses[seed] = (previous.0, previous.1 + 1)
+                        if previous.1 > 0 && now - previous.0 >= 0.04 {
+                            remember(.unknown, seed: seed, now: now); completion(seed, .unknown)
+                        } else { completion(seed, nil) }
+                        if captureMisses.count > 64 { captureMisses.removeAll(keepingCapacity: true) }
                     } else { completion(seed, nil) }
                     return
                 }
+                captureMisses.removeValue(forKey: snapshot.seed)
                 let found = matcher.identify(image: snapshot.image, width: snapshot.size.width, height: snapshot.size.height,
                     hotX: snapshot.hotSpot.x, hotY: snapshot.hotSpot.y)
                 if snapshot.seed >= 0 {

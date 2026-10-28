@@ -23,7 +23,6 @@ typedef CGError (*SelectFn)(GLConnection, const char *, int *);
 typedef CGError (*CoreSelectFn)(GLConnection, int);
 typedef CGError (*ConnectionPropertyFn)(GLConnection, GLConnection, CFStringRef, CFTypeRef);
 typedef CGError (*NewConnectionFn)(int, GLConnection *);
-typedef CGError (*WindowTagsFn)(GLConnection, int32_t, const uint64_t *, int);
 typedef CGError (*ClearCoreFn)(GLConnection);
 typedef int32_t (*VisibilityFn)(void);
 typedef void (*DockOverrideFn)(GLConnection, bool);
@@ -41,7 +40,6 @@ static ConnectionPropertyFn connectionPropertyFn;
 static BOOL backgroundUpdatesEnabled;
 static NewConnectionFn newConnectionFn;
 static GLConnection probeConnection;
-static WindowTagsFn clearWindowTagsFn;
 static ClearCoreFn clearCoreFn;
 static VisibilityFn visibilityFn;
 static DockOverrideFn dockOverrideFn;
@@ -64,7 +62,6 @@ static void loadSymbols(void) {
         coreSelectFn = (CoreSelectFn)dlsym(RTLD_DEFAULT, "CoreCursorSet");
         connectionPropertyFn = (ConnectionPropertyFn)dlsym(RTLD_DEFAULT, "CGSSetConnectionProperty");
         newConnectionFn = (NewConnectionFn)dlsym(RTLD_DEFAULT, "CGSNewConnection");
-        clearWindowTagsFn = (WindowTagsFn)dlsym(RTLD_DEFAULT, "CGSClearWindowTags");
         clearCoreFn = (ClearCoreFn)dlsym(RTLD_DEFAULT, "CoreCursorUnregisterAll");
         visibilityFn = (VisibilityFn)dlsym(RTLD_DEFAULT, "SLCursorIsVisible");
         dockOverrideFn = (DockOverrideFn)dlsym(RTLD_DEFAULT, "CGSSetDockCursorOverride");
@@ -94,17 +91,50 @@ static void loadSymbols(void) {
 }
 + (int32_t)cursorSeed { loadSymbols(); return seedFn ? seedFn() : -1; }
 + (int32_t)cursorVisibility { loadSymbols(); return visibilityFn ? (visibilityFn() != 0) : -1; }
-+ (void)setDockCursorOverride:(BOOL)enabled { loadSymbols(); if (connectionFn && dockOverrideFn) dockOverrideFn(connectionFn(), enabled); }
-+ (int32_t)clearCoreCursorCache { loadSymbols(); return connectionFn && clearCoreFn ? clearCoreFn(connectionFn()) : -10001; }
-+ (void)prepareOverlayWindow:(NSInteger)windowNumber {
-    loadSymbols();
-    if (connectionFn && clearWindowTagsFn) {
-        // A nonactivating NSPanel is normally allowed to set its own cursor
-        // while inactive. A cursor-only window must never claim that role.
-        const uint64_t tags = (uint64_t)1 << 5;
-        clearWindowTagsFn(connectionFn(), (int32_t)windowNumber, &tags, 64);
++ (int32_t)presentCursor:(NSCursor *)cursor {
+    // Force a cached image to be submitted even when another process changed
+    // the global cursor but AppKit still regards this object as current.
+    SEL selector = NSSelectorFromString(@"forceSet");
+    if ([cursor respondsToSelector:selector]) ((id (*)(id, SEL))objc_msgSend)(cursor, selector);
+    else [cursor set];
+    return [self cursorSeed];
+}
++ (BOOL)missionControlActiveWithDockPIDs:(NSArray<NSNumber *> *)dock managerPIDs:(NSArray<NSNumber *> *)manager {
+    // CGWindowListCreate uses raw window IDs, not CFNumber objects, and is
+    // deliberately unavailable in Swift. Query descriptions only for new
+    // windows and known shell windows, avoiding a full metadata scan at 5Hz.
+    @synchronized (self) {
+        static NSSet<NSNumber *> *seen, *owners;
+        static NSMutableSet<NSNumber *> *shell;
+        NSSet *currentOwners = [NSSet setWithArray:[dock arrayByAddingObjectsFromArray:manager]];
+        if (!shell || ![owners isEqualToSet:currentOwners]) {
+            shell = [NSMutableSet set]; seen = [NSSet set]; owners = currentOwners;
+        }
+        CFArrayRef ids = CGWindowListCreate(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+        if (!ids) return NO;
+        NSMutableSet<NSNumber *> *visible = [NSMutableSet set];
+        CFMutableArrayRef inspect = CFArrayCreateMutable(NULL, 0, NULL);
+        for (CFIndex i = 0; i < CFArrayGetCount(ids); i++) {
+            const void *value = CFArrayGetValueAtIndex(ids, i);
+            NSNumber *wid = @((CGWindowID)(uintptr_t)value); [visible addObject:wid];
+            if (![seen containsObject:wid] || [shell containsObject:wid]) CFArrayAppendValue(inspect, value);
+        }
+        CFRelease(ids); [shell intersectSet:visible]; seen = visible;
+        NSArray *rows = CFArrayGetCount(inspect) ? CFBridgingRelease(CGWindowListCreateDescriptionFromArray(inspect)) : @[];
+        CFRelease(inspect);
+        BOOL active = NO;
+        for (NSDictionary *row in rows) {
+            NSNumber *pid = row[(id)kCGWindowOwnerPID], *wid = row[(id)kCGWindowNumber];
+            if (![currentOwners containsObject:pid] || !wid) continue;
+            [shell addObject:wid];
+            int layer = [row[(id)kCGWindowLayer] intValue];
+            if (([dock containsObject:pid] && layer == 18) || ([manager containsObject:pid] && layer == 19)) active = YES;
+        }
+        return active;
     }
 }
++ (void)setDockCursorOverride:(BOOL)enabled { loadSymbols(); if (connectionFn && dockOverrideFn) dockOverrideFn(connectionFn(), enabled); }
++ (int32_t)clearCoreCursorCache { loadSymbols(); return connectionFn && clearCoreFn ? clearCoreFn(connectionFn()) : -10001; }
 + (int32_t)setBackgroundCursorUpdates:(BOOL)enabled {
     loadSymbols();
     if (!connectionFn || !connectionPropertyFn) return -10001;
@@ -120,6 +150,7 @@ static void loadSymbols(void) {
     loadSymbols();
     NSDictionary *selectors = @{
         @"com.apple.coregraphics.Arrow": @"arrowCursor", @"com.apple.cursor.0": @"arrowCursor", @"com.apple.coregraphics.IBeam": @"IBeamCursor",
+        @"com.apple.coregraphics.ArrowS": @"arrowCursor", @"com.apple.coregraphics.IBeamS": @"IBeamCursor",
         @"com.apple.coregraphics.IBeamXOR": @"IBeamCursor", @"com.apple.cursor.2": @"pointingHandCursor",
         @"com.apple.cursor.1": @"IBeamCursor",
         @"com.apple.cursor.13": @"pointingHandCursor", @"com.apple.cursor.3": @"operationNotAllowedCursor",

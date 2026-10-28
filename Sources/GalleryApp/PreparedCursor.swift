@@ -9,6 +9,7 @@ struct PreparedClip {
     let clip: CursorClip
     let frames: [PreparedFrame]
 }
+
 @MainActor
 final class PreparedCursors {
     private var decoded: [Data: CGImage] = [:]

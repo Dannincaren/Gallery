@@ -42,7 +42,21 @@ public enum CursorCatalog {
         all.first { $0.id == id }?.title ?? id.replacingOccurrences(of: "com.apple.", with: "")
     }
     public static func assetOnly(_ id: String) -> Bool { id.hasPrefix("com.apple.gallery.") }
-    public static func isArrow(_ id: String) -> Bool { id == "com.apple.coregraphics.Arrow" || id == "com.apple.cursor.0" }
+    public static func isArrow(_ id: String) -> Bool { ["com.apple.coregraphics.Arrow", "com.apple.cursor.0", "com.apple.coregraphics.ArrowS"].contains(id) }
+    /// Family identity is independent of editable/localized display names.
+    /// Two unrelated roles named "Cursor" must retain independent settings.
+    public static func family(_ id: String) -> String {
+        let compatible = id == "com.apple.coregraphics.ArrowS" ? "com.apple.coregraphics.Arrow"
+            : id == "com.apple.coregraphics.IBeamS" ? "com.apple.coregraphics.IBeam" : id
+        guard let row = all.first(where: { $0.id == compatible }) else { return id }
+        return all.first(where: { $0.title == row.title })!.id
+    }
+    public static let compatibilityAliases: [(String, String)] = [
+        ("com.apple.coregraphics.Arrow", "com.apple.cursor.0"),
+        ("com.apple.coregraphics.Arrow", "com.apple.coregraphics.ArrowS"),
+        ("com.apple.coregraphics.IBeam", "com.apple.cursor.1"),
+        ("com.apple.coregraphics.IBeam", "com.apple.coregraphics.IBeamS")
+    ]
 }
 
 public enum MouseEdge: Equatable { case down, up }

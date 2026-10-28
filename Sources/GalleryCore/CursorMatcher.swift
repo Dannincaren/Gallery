@@ -56,6 +56,7 @@ public struct CursorIdentification: Equatable, Sendable {
     public var roles: [String]
     public var appliedRoles: [String]
     public static let unknown = CursorIdentification(roles: [], appliedRoles: [])
+    public init(roles: [String], appliedRoles: [String] = []) { self.roles = roles; self.appliedRoles = appliedRoles }
 }
 
 public struct CursorMatcher {

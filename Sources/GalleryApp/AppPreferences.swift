@@ -10,6 +10,12 @@ final class AppPreferences: ObservableObject {
     @Published var applyAtLaunch: Bool {
         didSet { UserDefaults.standard.set(applyAtLaunch, forKey: "applyAtLaunch") }
     }
+    @Published var hideDockIconWhileRunning: Bool {
+        didSet { UserDefaults.standard.set(hideDockIconWhileRunning, forKey: "hideDockIconWhileRunning") }
+    }
+    @Published var shakeToLocate: Bool {
+        didSet { UserDefaults.standard.set(shakeToLocate, forKey: "shakeToLocate") }
+    }
     @Published private(set) var launchAtLogin = false
     @Published private(set) var needsApproval = false
     @Published var error: String?
@@ -17,6 +23,8 @@ final class AppPreferences: ObservableObject {
         let saved = UserDefaults.standard.double(forKey: "pointerScale")
         pointerScale = saved.isFinite && (0.5...3).contains(saved) ? saved : 1
         applyAtLaunch = UserDefaults.standard.bool(forKey: "applyAtLaunch")
+        hideDockIconWhileRunning = UserDefaults.standard.bool(forKey: "hideDockIconWhileRunning")
+        shakeToLocate = UserDefaults.standard.bool(forKey: "shakeToLocate")
         refreshLoginStatus()
     }
     func refreshLoginStatus() {

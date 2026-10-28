@@ -22,6 +22,13 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("Gallery resize corner hysteresis", regression.testResizeCornerHysteresis),
+    ("role families isolate link, horizontal and vertical settings", regression.testRoleFamiliesIgnoreNamesAndSeparateSizes),
+    ("deliberate shake, ordinary motion and recovery", regression.testDeliberateShakeAndRecovery),
+    ("late input keeps event clock and release wins", interaction.testDelayedDeliveryPreservesEventClockAndQuickRelease),
+    ("late unsplit click skips expired phases", interaction.testDelayedUnsplitClickSkipsExpiredSegments),
+    ("adaptive static, moving and animation wakeups", interaction.testAdaptiveWakeupDeadlines),
+    ("persisted thumbnails, invalidation and legacy index", regression.testPersistedThumbnailCacheAndLegacyIndex),
     ("duplicate frame order and frame limit", regression.testDuplicateFrameOrderAndLimit),
     ("role size, native mode and legacy defaults", regression.testRolePresentationArchiveAndLegacyDefaults),
     ("mixing a role preserves target aliases and other roles", regression.testMixedRoleTemplatePreservesTargetAndOtherRoles),

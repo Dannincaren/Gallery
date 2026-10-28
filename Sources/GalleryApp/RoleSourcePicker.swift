@@ -13,7 +13,7 @@ struct RoleSourcePicker: View {
     private var sources: [LibraryTheme] { store.library.filter { $0.id != store.selectedThemeID } }
     private var roles: [CursorRole] {
         var names = Set<String>()
-        return loaded?.roles.filter { names.insert($0.name).inserted } ?? []
+        return loaded?.roles.filter { names.insert(CursorCatalog.family($0.id)).inserted } ?? []
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {

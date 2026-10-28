@@ -1,4 +1,33 @@
-# 0.4.0 性能记录
+# 性能记录
+
+## 0.5.0：系统光标通道
+
+2026-10-28，本地 macOS 27.2 / Apple Silicon，release 构建，PRTS 主题。旧版覆盖窗口已移除，
+系统负责鼠标位置，程序只更新缓存图像帧。单帧常态采用系统注册资源或缓存 NSCursor，多帧和交互最多 60 次提交/秒。
+
+`Scripts/runtime-check.sh` 当前使用自己的 AppKit 事件循环和独立恢复记录，不移动鼠标或注入 OS 输入。
+CPU 为 getrusage 的进程用户及系统时间差 / 墙钟时间差；不包含 WindowServer、显示器或整机耗电。
+预热后静态箭头采样 4 秒，PRTS 多帧文字常态采样 3 秒：
+
+| 场景 | 自进程 CPU | 运行检查次数 |
+|---|---:|---:|
+| 静止箭头 | 0.45% | 4 秒 19 次 |
+| 多帧文字常态 | 4.09% | 按动画帧率更新 |
+
+以上是短时回归数值，不能作为所有应用的上限，也不与旧版不同测试程序构成严格功耗对照。
+额外检查包括实际系统图像三帧切换、300 次角色切换中的可见性与大小、点按抢占、自身帧过滤及停用恢复。
+调度中心模式以状态注入验证；本轮没有自动化真实三指滑动、锁屏或 Dock 长时间悬停。
+
+复测：
+
+```sh
+bash Scripts/runtime-check.sh /tmp/gallery-runtime-new /path/to/PRTS.gallery
+bash Scripts/editor-check.sh /tmp/gallery-editor-new
+```
+
+不要与正在运行的 Gallery 或其他光标工具并行检查。完成或失败后程序尝试恢复备份。
+
+## 0.4.0 历史记录（旧覆盖窗口实现）
 
 测量时间：2026-10-27。目的为检查同一机器上的回归与优化幅度，不设通用 CPU 保证。
 
@@ -29,7 +58,7 @@
 点击数据不是设备输入到屏幕发光的端到端延迟。拒绝输入监控权限时，还存在最多约一个 120 Hz 采样周期的等待，
 以及系统调度和显示器刷新时间。编辑器窗口可见时和其他复杂主题的 CPU 可能不同。
 
-## 复测当前版本
+## 旧版复测方式（不适用于 0.5.0）
 
 ```sh
 GALLERY_PERF_CHECK=1 GALLERY_FIXTURE_SYSTEM=1 bash Scripts/runtime-check.sh /tmp/gallery-perf /path/to/PRTS.gallery

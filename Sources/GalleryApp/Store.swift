@@ -23,6 +23,8 @@ final class GalleryStore: ObservableObject {
     private var handledLaunch = false
     private var pendingSave: DispatchWorkItem?
     private var revision = 0
+    private var thumbnailJobs = Set<String>()
+    private var subscriptions = Set<AnyCancellable>()
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
     init(preview: Bool = false, rootURL: URL? = nil) {
@@ -49,11 +51,21 @@ final class GalleryStore: ObservableObject {
     }
     func setPreviewTheme(_ theme: GalleryTheme) {
         self.theme = theme; selectedRole = theme.roles[0].id
-        library = [LibraryTheme(id: selectedThemeID, theme: theme)]
+        library = [ThemeLibrary.thumbnails(id: selectedThemeID, theme: theme, previous: nil)]
     }
     func handleLaunch() {
         guard !handledLaunch else { return }; handledLaunch = true
         runtime.setScale(preferences.pointerScale)
+        runtime.setShakeEnabled(preferences.shakeToLocate)
+        if selectionDefaults {
+            runtime.$enabled.combineLatest(preferences.$hideDockIconWhileRunning)
+                .map { $0 && $1 }.removeDuplicates().sink { hidden in
+                    NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                }.store(in: &subscriptions)
+            preferences.$shakeToLocate.removeDuplicates().sink { [weak self] value in
+                self?.runtime.setShakeEnabled(value)
+            }.store(in: &subscriptions)
+        }
         if preferences.applyAtLaunch && !runtime.hasRecovery { applyCurrentTheme() }
     }
     func applyCurrentTheme() {
@@ -63,15 +75,15 @@ final class GalleryStore: ObservableObject {
     }
     var visibleRoles: [CursorRole] {
         var seen = Set<String>()
-        return theme.roles.filter { seen.insert($0.name).inserted }
+        return theme.roles.filter { seen.insert(CursorCatalog.family($0.id)).inserted }
     }
     var roleIndex: Int? { theme.roles.firstIndex { $0.id == selectedRole } }
     var clip: CursorClip? { roleIndex.flatMap { theme.roles[$0].clip(selectedMotion) } }
     func edit(_ action: (inout CursorClip) -> Void) {
         guard !runtime.enabled, let index = roleIndex, var clip else { return }
         action(&clip)
-        let name = theme.roles[index].name
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips[selectedMotion.rawValue] = clip }
+        let family = CursorCatalog.family(theme.roles[index].id)
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func duplicateFrame(at index: Int) -> Int? {
@@ -83,18 +95,27 @@ final class GalleryStore: ObservableObject {
     }
     func createClip() {
         guard !runtime.enabled, let index = roleIndex else { return }
-        let name = theme.roles[index].name, clip = theme.roles[index].clip(.normal)
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips[selectedMotion.rawValue] = clip }
+        let family = CursorCatalog.family(theme.roles[index].id), clip = theme.roles[index].clip(.normal)
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func removeClip() {
         guard !runtime.enabled, selectedMotion != .normal, let index = roleIndex else { return }
-        let name = theme.roles[index].name
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
+        let family = CursorCatalog.family(theme.roles[index].id)
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
         changed()
     }
     private func refreshEntry() {
-        if let index = library.firstIndex(where: { $0.id == selectedThemeID }) { library[index] = LibraryTheme(id: selectedThemeID, theme: theme) }
+        if let index = library.firstIndex(where: { $0.id == selectedThemeID }) {
+            let old = library[index]
+            var updated = LibraryTheme(id: selectedThemeID, theme: theme)
+            for i in updated.roles.indices {
+                if let previous = old.roles.first(where: { $0.id == updated.roles[i].id }) {
+                    updated.roles[i].thumbnail = previous.thumbnail; updated.roles[i].thumbnailKey = previous.thumbnailKey
+                }
+            }
+            library[index] = updated
+        }
     }
     func changed() {
         revision += 1; refreshEntry(); pendingSave?.cancel(); saveStatus = "正在保存…"
@@ -110,12 +131,16 @@ final class GalleryStore: ObservableObject {
         let write = {
             try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try ThemeFiles.save(snapshot, to: destination)
-            try ThemeLibrary.saveIndex(rows, at: root.appendingPathComponent("themes.json"))
+            let row = ThemeLibrary.thumbnails(id: id, theme: snapshot, previous: rows.first { $0.id == id })
+            var updatedRows = rows
+            if let index = updatedRows.firstIndex(where: { $0.id == id }) { updatedRows[index] = row }
+            try ThemeLibrary.saveIndex(updatedRows, at: root.appendingPathComponent("themes.json"))
             // Preserve compatibility with the previous single-theme location.
             try Data(contentsOf: destination).write(to: root.appendingPathComponent("current.gallery"), options: .atomic)
+            return row
         }
         if wait {
-            do { try saveQueue.sync(execute: write); saveStatus = "已保存在本机" }
+            do { let row = try saveQueue.sync(execute: write); mergeThumbnails(row); saveStatus = "已保存在本机" }
             catch { saveStatus = "保存失败"; message = error.localizedDescription }
         } else {
             saveQueue.async { [weak self] in
@@ -123,9 +148,37 @@ final class GalleryStore: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self, self.revision == version else { return }
                     switch result {
-                    case .success: self.saveStatus = "已保存在本机"
+                    case .success(let row): self.mergeThumbnails(row); self.saveStatus = "已保存在本机"
                     case .failure(let error): self.saveStatus = "保存失败"; self.message = error.localizedDescription
                     }
+                }
+            }
+        }
+    }
+    private func mergeThumbnails(_ row: LibraryTheme) {
+        guard let index = library.firstIndex(where: { $0.id == row.id }) else { return }
+        var updated = library[index]
+        for i in updated.roles.indices {
+            if let source = row.roles.first(where: { $0.id == updated.roles[i].id }) {
+                updated.roles[i].thumbnail = source.thumbnail
+                updated.roles[i].thumbnailKey = source.thumbnailKey
+            }
+        }
+        library[index] = updated
+    }
+    func ensureThumbnails(_ id: String) {
+        guard !preview, let entry = library.first(where: { $0.id == id }), entry.roles.contains(where: { $0.thumbnail == nil }), !thumbnailJobs.contains(id) else { return }
+        if id == selectedThemeID { saveNow(); return }
+        thumbnailJobs.insert(id)
+        let url = themeURL(id)
+        saveQueue.async { [weak self] in
+            let row = (try? ThemeFiles.load(url)).map { ThemeLibrary.thumbnails(id: id, theme: $0, previous: entry) }
+            DispatchQueue.main.async {
+                guard let self else { return }; self.thumbnailJobs.remove(id)
+                if let row {
+                    self.mergeThumbnails(row)
+                    let rows = self.library, url = self.indexURL
+                    self.saveQueue.async { try? ThemeLibrary.saveIndex(rows, at: url) }
                 }
             }
         }
@@ -195,21 +248,21 @@ final class GalleryStore: ObservableObject {
     }
     func setSplitClick(_ enabled: Bool) {
         guard !runtime.enabled, let index = roleIndex else { return }
-        let name = theme.roles[index].name
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].splitClickAnimation = enabled }
+        let family = CursorCatalog.family(theme.roles[index].id)
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].splitClickAnimation = enabled }
         changed()
     }
-    func setRoleScale(_ value: Double) {
-        guard value.isFinite, let index = roleIndex else { return }
-        let name = theme.roles[index].name, value = min(3, max(0.5, value))
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].scale = value }
-        if activeThemeID == selectedThemeID { runtime.setRoleScale(value, for: selectedRole) }
+    func setRoleScale(_ value: Double, for identifier: String? = nil) {
+        guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
+        let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.5, value))
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].scale = value }
+        if activeThemeID == selectedThemeID { runtime.setRoleScale(value, for: theme.roles[index].id) }
         changed()
     }
     func setUsesNative(_ value: Bool) {
         guard !runtime.enabled, let index = roleIndex else { return }
-        let name = theme.roles[index].name
-        for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].usesNative = value }
+        let family = CursorCatalog.family(theme.roles[index].id)
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].usesNative = value }
         changed()
     }
     func useTemplate(_ role: CursorRole, sourceName: String) {
@@ -244,8 +297,8 @@ final class GalleryStore: ObservableObject {
             }
             result.frames = (append ? old.frames : []) + newFrames
             try result.validate()
-            let name = theme.roles[index].name
-            for i in theme.roles.indices where theme.roles[i].name == name { theme.roles[i].clips[selectedMotion.rawValue] = result }
+            let family = CursorCatalog.family(theme.roles[index].id)
+            for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = result }
             changed()
         } catch { message = error.localizedDescription }
     }
