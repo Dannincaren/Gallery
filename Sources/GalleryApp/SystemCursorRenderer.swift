@@ -10,18 +10,36 @@ final class SystemCursorRenderer {
         let role: String, motion: Motion, image: ObjectIdentifier, scale: Int
     }
     private var cache: [Key: NSCursor] = [:]
+    private var fingerprints: [Key: CursorFingerprint] = [:]
     private var order: [Key] = []
     private var submittedSeeds: [Int32: String] = [:]
     private var seedOrder: [Int32] = []
     private var lastKey: Key?
     private var backgroundOwned = false
+    private var submissionRevision = 0
+    private(set) var pendingImage: (revision: Int, fingerprint: CursorFingerprint)?
     private(set) var nextFrameDeadline: Double?
     private(set) var displayedFrame: Data?
     private(set) var size = CGSize.zero
     private(set) var submissions = 0
+    #if GALLERY_RUNTIME_CHECKS
+    var testDelayedSeed = false
+    #endif
     // The same cached resource seed can reappear when another application
     // selects a previously used role. A history hit alone is not ownership.
     func owns(seed: Int32) -> Bool { seed >= 0 && lastKey != nil && submittedSeeds[seed] == lastKey?.role }
+    private func remember(seed: Int32, role: String) {
+        guard seed >= 0 else { return }
+        if submittedSeeds[seed] == nil { seedOrder.append(seed) }
+        submittedSeeds[seed] = role
+        if seedOrder.count > 256 { submittedSeeds.removeValue(forKey: seedOrder.removeFirst()) }
+    }
+    func confirmPending(seed: Int32, revision: Int) -> Bool {
+        guard pendingImage?.revision == revision, let role = lastKey?.role else { return false }
+        remember(seed: seed, role: role); pendingImage = nil
+        return true
+    }
+    func cancelPending() { pendingImage = nil }
     func present(_ prepared: PreparedClip, role: String, motion: Motion, scale: Double,
                  started: Double, now: Double, staticOnly: Bool = false) {
         let clip = prepared.clip
@@ -34,7 +52,7 @@ final class SystemCursorRenderer {
         let geometry = clip.scaled(by: Double(key.scale) / 100)
         size = CGSize(width: geometry.width, height: geometry.height); displayedFrame = prepared.frames[index].data
         let seed = GLCursorBridge.cursorSeed()
-        if lastKey == key && owns(seed: seed) { return }
+        if lastKey == key && (owns(seed: seed) || pendingImage != nil) { return }
         // Respect cursor hiding owned by the foreground app (typing, games).
         // There are no Gallery hide tickets to accumulate or recover here.
         guard GLCursorBridge.cursorVisibility() != 0 else { return }
@@ -44,23 +62,35 @@ final class SystemCursorRenderer {
             cursor = NSCursor(image: NSImage(cgImage: prepared.frames[index].image, size: size),
                               hotSpot: NSPoint(x: geometry.hotX, y: geometry.hotY))
             cache[key] = cursor; order.append(key)
-            if order.count > 256 { cache.removeValue(forKey: order.removeFirst()) }
+            if order.count > 256 { let oldest = order.removeFirst(); cache.removeValue(forKey: oldest); fingerprints.removeValue(forKey: oldest) }
         }
         if !backgroundOwned {
             guard GLCursorBridge.setBackgroundCursorUpdates(true) == 0 else { return }
             backgroundOwned = true
         }
-        let submitted = GLCursorBridge.present(cursor)
-        if submitted >= 0 {
-            if submittedSeeds[submitted] == nil { seedOrder.append(submitted) }
-            submittedSeeds[submitted] = role
-            if seedOrder.count > 256 { submittedSeeds.removeValue(forKey: seedOrder.removeFirst()) }
+        let before = GLCursorBridge.cursorSeed()
+        let actual = GLCursorBridge.present(cursor)
+        #if GALLERY_RUNTIME_CHECKS
+        let returned = testDelayedSeed ? before : actual
+        #else
+        let returned = actual
+        #endif
+        submissionRevision += 1; pendingImage = nil
+        if returned >= 0 && returned != before { remember(seed: returned, role: role) }
+        else {
+            // An unchanged return value is still the preceding foreground
+            // resource. A matching capture must acknowledge the delayed seed.
+            if fingerprints[key] == nil {
+                fingerprints[key] = CursorFingerprint(image: prepared.frames[index].image,
+                    width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
+            }
+            if let fingerprint = fingerprints[key] { pendingImage = (submissionRevision, fingerprint) }
         }
         lastKey = key; submissions += 1
     }
     func passThrough(frame: Data? = nil, size: CGSize = .zero) {
         if backgroundOwned { _ = GLCursorBridge.setBackgroundCursorUpdates(false); backgroundOwned = false }
-        lastKey = nil; nextFrameDeadline = nil; displayedFrame = frame; self.size = size
+        lastKey = nil; pendingImage = nil; nextFrameDeadline = nil; displayedFrame = frame; self.size = size
     }
     func stop(restoring original: [String: Any]?) {
         if backgroundOwned, let original, let clip = try? CursorImages.fromCape(original),
@@ -69,6 +99,6 @@ final class SystemCursorRenderer {
                                   hotSpot: NSPoint(x: clip.hotX, y: clip.hotY))
             _ = GLCursorBridge.present(cursor)
         }
-        passThrough(); cache.removeAll(); order.removeAll(); submittedSeeds.removeAll(); seedOrder.removeAll()
+        passThrough(); cache.removeAll(); fingerprints.removeAll(); order.removeAll(); submittedSeeds.removeAll(); seedOrder.removeAll()
     }
 }

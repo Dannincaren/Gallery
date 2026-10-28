@@ -15,6 +15,9 @@ public struct PointerShake {
         let dx = x - old.0, dy = y - old.1, length = hypot(dx, dy), dt = time - old.2
         guard dt > 0, length >= 8 else { return }
         anchor = (x, y, time)
+        // One gesture has one envelope. Its final reversals must not reset
+        // the attack while the pointer is already enlarged or shrinking.
+        if time - triggered < 0.65 { direction = nil; turns.removeAll(); travel.removeAll(); return }
         if dt > 0.2 || length / dt < 500 { direction = nil; turns.removeAll(); travel.removeAll(); return }
         travel.append((time, length)); travel.removeAll { time - $0.0 > 0.45 }
         turns.removeAll { time - $0 > 0.45 }
@@ -26,11 +29,14 @@ public struct PointerShake {
     public func scale(at time: Double) -> Double {
         let elapsed = time - triggered
         guard elapsed >= 0, elapsed < 0.65 else { return 1 }
-        if elapsed < 0.08 { return 1 + elapsed / 0.08 }
-        if elapsed > 0.4 { return 1 + (0.65 - elapsed) / 0.25 }
+        if elapsed < 0.08 { let t = elapsed / 0.08; return 2 - pow(1 - t, 3) }
+        if elapsed > 0.4 { let t = (elapsed - 0.4) / 0.25; return 2 - t * t * (3 - 2 * t) }
         return 2
     }
     public func nextDeadline(at time: Double) -> Double? {
-        time - triggered < 0.65 ? time + 1.0 / 30 : nil
+        let elapsed = time - triggered
+        guard elapsed >= 0, elapsed < 0.65 else { return nil }
+        if elapsed >= 0.08 && elapsed < 0.4 { return triggered + 0.4 }
+        return min(triggered + 0.65, time + 1.0 / 60)
     }
 }

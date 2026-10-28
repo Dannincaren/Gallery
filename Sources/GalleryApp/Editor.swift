@@ -98,12 +98,9 @@ struct GalleryEditor: View {
                         }
                         if let index = store.roleIndex {
                             roleControls(store.theme.roles[index])
-                            Toggle("拆分按下、按住与松手动画", isOn: Binding(
-                                get: { store.theme.roles[index].splitClickAnimation }, set: { store.setSplitClick($0) }))
-                                .disabled(runtime.enabled)
                             Text(store.theme.roles[index].splitClickAnimation
-                                 ? "按住时进入持续状态，松开时立即播放松手动画。默认仅正常选择启用。"
-                                 : "点击后自动连播按下与松手动画；不等待抬起，也不进入按住状态。")
+                                 ? "已添加按住动画：按住时持续播放，松开时播放松手动画。"
+                                 : "未添加按住动画：点击后自动连播按下与松手动画。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Picker("动画状态", selection: $store.selectedMotion) {
@@ -128,7 +125,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.5.1 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery 0.5.2 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }

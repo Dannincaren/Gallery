@@ -46,6 +46,7 @@ final class CursorRuntime: ObservableObject {
     #if GALLERY_RUNTIME_CHECKS
     private var inputRecords: [[String: Any]] = []
     private var renderRecords: [[String: Any]] = []
+    private var observationRecords: [[String: Any]] = []
     private var lastRecordedPhase = ""
     #endif
     private var activity: NSObjectProtocol?
@@ -90,7 +91,14 @@ final class CursorRuntime: ObservableObject {
                                 hotX: snapshot.hotSpot.x, hotY: snapshot.hotSpot.y).appliedRoles.contains(id)
     }
     var testRecognitionSuspended = false
-    func testIdentify(_ ids: [String]) { lastSeed = GLCursorBridge.cursorSeed(); applyIdentification(CursorIdentification(roles: ids, appliedRoles: [])) }
+    func testIdentify(_ ids: [String], applied: [String] = []) {
+        lastSeed = GLCursorBridge.cursorSeed(); applyIdentification(CursorIdentification(roles: ids, appliedRoles: applied))
+    }
+    var testFrameDeadline: Double? { renderer.nextFrameDeadline }
+    var testSubmissions: Int { renderer.submissions }
+    func testDeliverObservation(seed: Int32, roles ids: [String]) {
+        acceptObservation(seed: seed, found: CursorIdentification(roles: ids), generation: generation, revision: roleRevision)
+    }
     var testRole: String? { roleID }
     var testEffectiveIdleDelay: Double { idleDelay }
     func testScene(_ value: Bool?) { scenes.testOverride = value; scenes.check(force: true) }
@@ -99,7 +107,8 @@ final class CursorRuntime: ObservableObject {
         ["status": status, "enabled": enabled, "motion": machine.motion.rawValue, "motionStart": machine.motionStartedAt,
          "source": observation.description, "sourceEvents": observation.deliveredEvents, "ticks": tickCount,
          "renderer": "system", "submissions": renderer.submissions, "registeredRoles": normal.keys.sorted(), "nativeVisible": GLCursorBridge.cursorVisibility(), "missionControl": scenes.missionControl,
-         "inputs": inputRecords, "renders": renderRecords]
+         "inputs": inputRecords, "renders": renderRecords, "observations": observationRecords,
+         "seed": GLCursorBridge.cursorSeed(), "lastSeed": lastSeed, "ownsCurrent": renderer.owns(seed: GLCursorBridge.cursorSeed())]
     }
     #endif
     private var journalURL: URL {
@@ -225,37 +234,57 @@ final class CursorRuntime: ObservableObject {
     }
     private func updateIdentification() {
         #if GALLERY_RUNTIME_CHECKS
-        if testRecognitionSuspended { return }
+        if testRecognitionSuspended && renderer.pendingImage == nil { return }
         #endif
         if editorCorner.active { return }
         guard !recognizing, let recognition else { return }
         let seed = GLCursorBridge.cursorSeed()
         guard !scenes.missionControl, !renderer.owns(seed: seed) else { return }
-        guard seed != lastSeed || now - lastProbe > 1 else { return }
+        guard seed != lastSeed || renderer.pendingImage != nil || now - lastProbe > 1 else { return }
         lastProbe = now; recognizing = true
         let currentGeneration = generation
         let currentRoleRevision = roleRevision
-        recognition.probe { [weak self] seed, found in
+        let pending = renderer.pendingImage
+        recognition.probe(pendingImage: pending?.fingerprint) { [weak self] seed, found, ownImage in
             DispatchQueue.main.async {
-                guard let self, self.enabled, currentGeneration == self.generation else { return }
-                self.recognizing = false
-                guard currentRoleRevision == self.roleRevision else { self.armTimer(after: 0.001); return }
-                let current = GLCursorBridge.cursorSeed()
-                // Capture runs on a worker: its image may have changed to one
-                // of our frames after the request was enqueued. Filter again
-                // at delivery, not only before requesting the observation.
-                guard !self.renderer.owns(seed: seed) else { return }
-                guard let found, seed == current || self.renderer.owns(seed: current) else { self.armTimer(after: 0.001); return }
-                self.lastSeed = seed; self.applyIdentification(found)
+                if ownImage {
+                    guard let self, self.enabled, currentGeneration == self.generation else { return }
+                    self.recognizing = false
+                    guard currentRoleRevision == self.roleRevision, let pending,
+                          seed == GLCursorBridge.cursorSeed() else { self.armTimer(after: 0.001); return }
+                    if !self.renderer.confirmPending(seed: seed, revision: pending.revision) { self.armTimer(after: 0.001) }
+                    return
+                }
+                self?.acceptObservation(seed: seed, found: found, generation: currentGeneration, revision: currentRoleRevision)
             }
         }
+    }
+    private func acceptObservation(seed: Int32, found: CursorIdentification?, generation capturedGeneration: Int, revision: Int) {
+        #if GALLERY_RUNTIME_CHECKS
+        observationRecords.append(["seed": seed, "current": GLCursorBridge.cursorSeed(), "roles": found?.roles ?? [],
+            "revision": revision, "currentRevision": roleRevision, "role": roleID ?? "nil", "at": now,
+            "ownsSnapshot": renderer.owns(seed: seed), "ownsCurrent": renderer.owns(seed: GLCursorBridge.cursorSeed())])
+        if observationRecords.count > 100 { observationRecords.removeFirst() }
+        #endif
+        guard enabled, capturedGeneration == generation else { return }
+        recognizing = false
+        #if GALLERY_RUNTIME_CHECKS
+        if testRecognitionSuspended { return }
+        #endif
+        guard revision == roleRevision else { armTimer(after: 0.001); return }
+        // The captured image must still be the visible resource. Our current
+        // frame does not make an older foreign observation valid again.
+        guard !renderer.owns(seed: seed) else { return }
+        guard let found, seed == GLCursorBridge.cursorSeed() else { armTimer(after: 0.001); return }
+        renderer.cancelPending()
+        lastSeed = seed; applyIdentification(found)
     }
     private func applyIdentification(_ found: CursorIdentification) {
         let ids = scenes.missionControl && roles["com.apple.coregraphics.Arrow"] != nil
             ? ["com.apple.coregraphics.Arrow"] : found.roles.filter { roles[$0] != nil }
         let candidates = Set(ids.compactMap { canonicalRoles[$0] })
         let selected = roleID.flatMap { candidates.contains($0) ? $0 : nil } ?? candidates.sorted().first
-        registeredMatch = found.appliedRoles.contains { candidates.contains(canonicalRoles[$0] ?? $0) }
+        registeredMatch = selected != nil && found.appliedRoles.contains { canonicalRoles[$0] == selected }
 
         if selected == nil, roleID != nil {
             if unknownSince == nil { unknownSince = now; lastSeed = -1; armTimer(after: 0.025); return }
@@ -266,14 +295,9 @@ final class CursorRuntime: ObservableObject {
         if selected != roleID {
             roleRevision += 1
             roleID = selected
-            let held = machine.buttonDown && physicalLeftDown()
-            machine.reset(now: now)
-            if held {
-                machine.down(now: lastLeftDown, pressDuration: currentRole?.clip(.press)?.duration,
-                    enabled: theme?.clickEnabled ?? false, split: currentRole?.splitClickAnimation ?? false,
-                    releaseDuration: currentRole?.clip(.release)?.duration)
-                machine.tick(now: now, idleDelay: idleDelay, idleEnabled: false)
-            }
+            // Drag/drop and focus changes can change the cursor family in
+            // the middle of a click. Preserve that gesture's phase and epoch.
+            if machine.motion == .normal || machine.motion == .idle { machine.reset(now: now) }
             if selected == nil {
                 renderer.passThrough()
                 status = "自定义光标 · 等待已知状态后自动恢复"
@@ -339,7 +363,7 @@ final class CursorRuntime: ObservableObject {
             frameDeadline: [renderer.nextFrameDeadline, shakeEnabled ? shake.nextDeadline(at: now) : nil].compactMap { $0 }.min(), transitionDeadline: machine.transitionDeadline,
             idleDeadline: (theme?.idleEnabled == true && currentRole?.clip(.idle) != nil && !machine.buttonDown && machine.motion == .normal)
                 ? machine.lastActivity + idleDelay : nil)
-        armTimer(after: delay)
+        armTimer(after: renderer.pendingImage != nil ? min(delay, 0.002) : delay)
     }
     private func tick() {
         guard enabled, let theme else { return }; tickCount += 1
@@ -388,7 +412,12 @@ final class CursorRuntime: ObservableObject {
             if renderRecords.count > 200 { renderRecords.removeFirst() }
         }
         #endif
-        if registeredMatch && motion == .normal && clip.frames.count == 1 && magnification == 1
+        // Registered resize animations belong to the foreground application's
+        // cursor tracking, just like static registered pointers. Replacing each
+        // frame from the background can outlive a narrow divider and mask its
+        // native exit until the application rebuilds its cursor regions.
+        let nativeNormal = clip.frames.count == 1 || CursorCatalog.isResize(role.id)
+        if registeredMatch && motion == .normal && nativeNormal && magnification == 1
             && abs(scale - (registeredScales[role.id] ?? -1)) < 0.005 && !renderer.owns(seed: currentSeed) {
             let geometry = clip.clip.scaled(by: scale)
             renderer.passThrough(frame: clip.frames[0].data, size: CGSize(width: geometry.width, height: geometry.height))
@@ -426,8 +455,15 @@ final class CursorRuntime: ObservableObject {
         }
         switch type {
         case .leftMouseDown, .leftMouseUp:
-            guard timestamp >= lastLeftEdge - 0.0001 else { return }
-            if type == .leftMouseDown && machine.buttonDown { return }
+            if type == .leftMouseDown {
+                // Polling and the event monitor can report the same edge
+                // with slightly different clocks. A late down must not start
+                // a second release after the physical mouse-up was handled.
+                guard !machine.buttonDown, timestamp > lastLeftDown + 0.001, timestamp > lastLeftUp else { return }
+            } else {
+                guard machine.buttonDown, timestamp >= lastLeftDown else { return }
+            }
+            guard timestamp >= lastLeftEdge else { return }
             lastLeftEdge = timestamp; lastLocation = position ?? NSEvent.mouseLocation
             #if GALLERY_RUNTIME_CHECKS
             inputRecords.append(["edge": type == .leftMouseDown ? "down" : "up", "at": now, "eventAt": timestamp, "observed": observed])

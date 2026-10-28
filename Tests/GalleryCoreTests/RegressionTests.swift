@@ -3,6 +3,36 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testSharedDragImagesPreferPrimaryRoles() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)])
+        for order in [["com.apple.coregraphics.Alias", "com.apple.cursor.13"], ["com.apple.cursor.13", "com.apple.coregraphics.Alias"]] {
+            var matcher = CursorMatcher()
+            for id in order { matcher.add(clip, role: id) }
+            expectEqual(matcher.match(clip), ["com.apple.cursor.13"])
+        }
+        var arrow = CursorMatcher()
+        arrow.add(clip, role: "com.apple.cursor.5", applied: true)
+        arrow.add(clip, role: "com.apple.coregraphics.Arrow", applied: true)
+        expectEqual(arrow.match(clip), ["com.apple.coregraphics.Arrow"])
+        var dragOnly = CursorMatcher(); dragOnly.add(clip, role: "com.apple.cursor.5")
+        expectEqual(dragOnly.match(clip), ["com.apple.cursor.5"])
+    }
+    func testShakeEnvelopeDoesNotRestartAndShrinksSmoothly() {
+        var shake = PointerShake()
+        for (i, x) in [0.0, 70, -70, 70, -70].enumerated() { shake.observe(x: x, y: 0, at: Double(i) * 0.05) }
+        let initial = shake.scale(at: 0.3)
+        for i in 0..<8 { shake.observe(x: i % 2 == 0 ? 70 : -70, y: 0, at: 0.3 + Double(i) * 0.025) }
+        expectEqual(initial, 2); expectEqual(shake.scale(at: 0.5), 2)
+        var previous = 2.0
+        for i in 0...30 {
+            let next = shake.scale(at: 0.6 + Double(i) / 120)
+            expectFalse(next > previous + 0.000001)
+            expectFalse(previous - next > 0.06)
+            previous = next
+        }
+        expectEqual(shake.scale(at: 0.85), 1, accuracy: 0.000001)
+        expectEqual(shake.nextDeadline(at: 0.3)!, 0.6, accuracy: 0.000001)
+    }
     func testHighResolutionStaticCursorObservation() throws {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)], hotX: 4, hotY: 4)
         let image = try CursorImages.bitmap(clip.frames[0])
@@ -187,12 +217,21 @@ final class RegressionTests {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)])
         for descriptor in CursorCatalog.all {
             let role = CursorRole(id: descriptor.id, name: descriptor.title, clips: ["normal": clip])
-            expectEqual(role.splitClickAnimation, CursorCatalog.isArrow(descriptor.id))
+            expectFalse(role.splitClickAnimation)
             var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(role)) as! [String: Any]
             object.removeValue(forKey: "splitClickAnimation")
             let legacy = try JSONDecoder().decode(CursorRole.self, from: JSONSerialization.data(withJSONObject: object))
             expectEqual(legacy.splitClickAnimation, role.splitClickAnimation)
         }
+        var role = CursorRole(id: "com.apple.cursor.13", name: "Link", clips: ["normal": clip, "press": clip, "release": clip], splitClickAnimation: true)
+        expectFalse(role.splitClickAnimation)
+        role.clips["hold"] = clip
+        expectEqual(role.splitClickAnimation, true)
+        var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(role)) as! [String: Any]
+        old["splitClickAnimation"] = false
+        let migrated = try JSONDecoder().decode(CursorRole.self, from: JSONSerialization.data(withJSONObject: old))
+        expectEqual(migrated.splitClickAnimation, true)
+        role.clips.removeValue(forKey: "hold"); expectFalse(role.splitClickAnimation)
     }
     func testPassiveQuickClickAndCounterWrap() {
         var edges = MouseEdgeTracker(downs: .max, ups: .max)

@@ -22,6 +22,8 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("shared drag images prefer primary arrow and link roles", regression.testSharedDragImagesPreferPrimaryRoles),
+    ("shake has one smooth monotonic shrink without retrigger", regression.testShakeEnvelopeDoesNotRestartAndShrinksSmoothly),
     ("high-resolution static cursor returns to arrow", regression.testHighResolutionStaticCursorObservation),
     ("duplicate frame runs preserve loop timing", regression.testRepeatedFrameRunsKeepLoopTiming),
     ("per-role idle deadline, archive and legacy defaults", regression.testRoleIdleOverrideArchiveAndLegacy),
@@ -51,7 +53,7 @@ var checks: [(String, () throws -> Void)] = [
     ("CUR DIB alpha and bottom-up orientation", imports.testCURDIBAlphaAndBottomUpOrder),
     ("unsplit click completes after quick mouse-up", regression.testUnsplitClickCompletesWithoutHoldOrRelease),
     ("unsplit click automatically plays the release segment", regression.testUnsplitClickAutomaticallyPlaysRelease),
-    ("arrow-only split defaults and old theme migration", regression.testRoleDefaultsAndLegacyMigration),
+    ("hold assets determine interaction and override legacy switches", regression.testRoleDefaultsAndLegacyMigration),
     ("background quick-click counters and wrap", regression.testPassiveQuickClickAndCounterWrap),
     ("portable archive deduplication and overrides", regression.testArchiveDeduplicatesAndPreservesOverrides),
     ("known-unknown-known cursor recovery", regression.testUnknownDoesNotPoisonLaterKnownMatch)

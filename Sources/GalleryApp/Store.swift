@@ -267,12 +267,6 @@ final class GalleryStore: ObservableObject {
             }
         }
     }
-    func setSplitClick(_ enabled: Bool) {
-        guard !runtime.enabled, let index = roleIndex else { return }
-        let family = CursorCatalog.family(theme.roles[index].id)
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].splitClickAnimation = enabled }
-        changed()
-    }
     func setRoleScale(_ value: Double, for identifier: String? = nil) {
         guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
         let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.5, value))

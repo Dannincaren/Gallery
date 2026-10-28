@@ -68,7 +68,9 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     public var id: String
     public var name: String
     public var clips: [String: CursorClip]
-    public var splitClickAnimation: Bool
+    /// Presence of a hold clip is the interaction policy. Old serialized
+    /// switches are accepted on import but no longer override the assets.
+    public var splitClickAnimation: Bool { clip(.hold) != nil }
     public var scale: Double
     public var usesNative: Bool
     public var sourceThemeName: String?
@@ -76,7 +78,6 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     public init(id: String, name: String, clips: [String: CursorClip], splitClickAnimation: Bool? = nil,
                 scale: Double = 1, usesNative: Bool = false, sourceThemeName: String? = nil, idleDelayOverride: Double? = nil) {
         self.id = id; self.name = name; self.clips = clips
-        self.splitClickAnimation = splitClickAnimation ?? CursorCatalog.isArrow(id)
         self.scale = scale; self.usesNative = usesNative; self.sourceThemeName = sourceThemeName
         self.idleDelayOverride = idleDelayOverride
     }
@@ -86,11 +87,19 @@ public struct CursorRole: Codable, Equatable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         clips = try c.decode([String: CursorClip].self, forKey: .clips)
-        splitClickAnimation = try c.decodeIfPresent(Bool.self, forKey: .splitClickAnimation) ?? CursorCatalog.isArrow(id)
         scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? 1
         usesNative = try c.decodeIfPresent(Bool.self, forKey: .usesNative) ?? false
         sourceThemeName = try c.decodeIfPresent(String.self, forKey: .sourceThemeName)
         idleDelayOverride = try c.decodeIfPresent(Double.self, forKey: .idleDelayOverride)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(name, forKey: .name); try c.encode(clips, forKey: .clips)
+        // Keep the legacy key so older readers can still import new themes.
+        try c.encode(splitClickAnimation, forKey: .splitClickAnimation)
+        try c.encode(scale, forKey: .scale); try c.encode(usesNative, forKey: .usesNative)
+        try c.encodeIfPresent(sourceThemeName, forKey: .sourceThemeName)
+        try c.encodeIfPresent(idleDelayOverride, forKey: .idleDelayOverride)
     }
     public func clip(_ motion: Motion) -> CursorClip? { clips[motion.rawValue] }
     public func idleDelay(default global: Double) -> Double { idleDelayOverride ?? global }

@@ -3,7 +3,7 @@ import AppKit
 /// A visual fingerprint normalized to the visible bounding box. WindowServer
 /// can crop transparent padding and scale a registered image; exact PNG/TIFF
 /// hashes are not an appropriate semantic cursor identity.
-public struct CursorFingerprint: Hashable {
+public struct CursorFingerprint: Hashable, Sendable {
     let pixels: [UInt8]
     let aspect: Int
     let hotX: Int
@@ -63,6 +63,7 @@ public struct CursorMatcher {
     private struct Entry {
         var roles = Set<String>()
         var applied = Set<String>()
+        var priority = Int.min
     }
     private var entries: [CursorFingerprint: Entry] = [:]
     private var animatedFrameCounts = Set<Int>()
@@ -78,6 +79,12 @@ public struct CursorMatcher {
         for frame in clip.sampled().frames {
             if let sample = CursorFingerprint(data: frame, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY) {
                 var entry = entries[sample] ?? Entry()
+                // Drag aliases can expose the same system image as an arrow
+                // or pointing hand. Prefer the primary semantic role rather
+                // than keeping the previous drag/arrow family indefinitely.
+                let priority = ["com.apple.coregraphics.Alias", "com.apple.coregraphics.Copy", "com.apple.cursor.5"].contains(role) ? -1 : 0
+                if priority < entry.priority { continue }
+                if priority > entry.priority { entry = Entry(priority: priority) }
                 entry.roles.insert(role)
                 if applied { entry.applied.insert(role) }
                 entries[sample] = entry
