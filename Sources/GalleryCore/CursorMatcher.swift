@@ -59,8 +59,8 @@ public struct CursorIdentification: Equatable, Sendable {
     public init(roles: [String], appliedRoles: [String] = []) { self.roles = roles; self.appliedRoles = appliedRoles }
 }
 
-public struct CursorMatcher {
-    private struct Entry {
+public struct CursorMatcher: Sendable {
+    private struct Entry: Sendable {
         var roles = Set<String>()
         var applied = Set<String>()
         var priority = Int.min

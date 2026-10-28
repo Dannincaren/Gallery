@@ -1,6 +1,76 @@
 import AppKit
 import Darwin
 import GalleryCore
+import GalleryNative
+
+private final class TracePacket: @unchecked Sendable {
+    let snapshot: GLCursorSnapshot
+    let metadata: [String: Any]
+    init(_ snapshot: GLCursorSnapshot, _ metadata: [String: Any]) { self.snapshot = snapshot; self.metadata = metadata }
+}
+private final class CursorTraceWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "Gallery.test-cursor-writer", qos: .utility)
+    private let lock = NSLock()
+    private var pending = 0
+    private var rows: [[String: Any]] = []
+    private let folder: URL
+    private let output: FileHandle?
+    init(folder: URL) {
+        self.folder = folder
+        let path = folder.appendingPathComponent("frames.jsonl")
+        FileManager.default.createFile(atPath: path.path, contents: nil)
+        output = try? FileHandle(forWritingTo: path)
+    }
+    func append(_ packet: TracePacket) -> Bool {
+        lock.lock()
+        guard pending < 2 else { lock.unlock(); return false }
+        pending += 1; lock.unlock()
+        queue.async { [self] in
+            defer { lock.lock(); pending -= 1; lock.unlock() }
+            let name = String(format: "cursor-%04d.png", rows.count)
+            guard let data = try? CursorImages.png(packet.snapshot.image) else { return }
+            try? data.write(to: folder.appendingPathComponent(name))
+            var row = packet.metadata; row["image"] = name; rows.append(row)
+            if var metadata = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]) {
+                metadata.append(0x0A); try? output?.write(contentsOf: metadata)
+            }
+        }
+        return true
+    }
+}
+private final class StatePacket: @unchecked Sendable {
+    let state: [String: Any]
+    init(_ state: [String: Any]) { self.state = state }
+}
+@MainActor
+final class CursorTrace {
+    private var timer: Timer?
+    private var count = 0
+    private var seed: Int32 = -1
+    func start(at root: URL, runtime: CursorRuntime?) throws {
+        timer?.invalidate(); count = 0; seed = -1
+        let folder = root.appendingPathComponent("CursorTrace-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let writer = CursorTraceWriter(folder: folder)
+        let until = ProcessInfo.processInfo.systemUptime + 600
+        let timer = Timer(timeInterval: 1.0 / 240, repeats: true) { [weak self, weak runtime] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                let now = ProcessInfo.processInfo.systemUptime
+                guard now < until, self.count < 2000 else { timer.invalidate(); return }
+                let next = GLCursorBridge.cursorSeed()
+                guard next != self.seed, let image = GLCursorBridge.currentSnapshot() else { return }
+                let packet = TracePacket(image, ["at": now, "seed": image.seed,
+                    "width": image.size.width, "height": image.size.height,
+                    "hotX": image.hotSpot.x, "hotY": image.hotSpot.y,
+                    "role": runtime?.testRole ?? "nil", "motion": runtime?.testMotion.rawValue ?? "nil",
+                    "started": runtime?.testMotionStartedAt ?? 0])
+                if writer.append(packet) { self.seed = image.seed; self.count += 1 }
+            }
+        }
+        self.timer = timer; RunLoop.main.add(timer, forMode: .common)
+    }
+}
 
 @MainActor
 final class InputSurface: NSView {
@@ -99,10 +169,11 @@ struct LiveInputHarness {
             runtime = CursorRuntime(recoveryURL: root.appendingPathComponent("recovery.plist"))
             delegate.runtime = runtime
             if runtime!.hasRecovery { runtime!.recover() }
+            if let scale = config["scale"].flatMap(Double.init) { runtime!.setScale(scale) }
             runtime!.start(theme)
             print("START", runtime!.enabled, runtime!.error ?? runtime!.status)
             guard runtime!.enabled else { throw ThemeError.invalid(runtime!.error ?? "启用失败") }
-            do { try inputChecks(runtime!, root: root) }
+            do { if config["traceOnly"] != "1" { try inputChecks(runtime!, root: root) } }
             catch {
                 _ = runtime!.stop()
                 print("FAIL", error.localizedDescription)
@@ -114,10 +185,17 @@ struct LiveInputHarness {
         let appMenu = NSMenu(); appMenu.addItem(withTitle: "退出验证", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"); appItem.submenu = appMenu; NSApp.mainMenu = menu
         var baselineCPU = cpu(), baselineTime = ProcessInfo.processInfo.systemUptime
         var history: [[String: Any]] = [], lastScene: Bool?
+        let trace = CursorTrace()
+        let stateQueue = DispatchQueue(label: "Gallery.test-state-writer", qos: .utility)
+        if config["traceOnly"] == "1" { try trace.start(at: root, runtime: runtime) }
         let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
             MainActor.assumeIsolated {
                 let command = (try? String(contentsOf: root.appendingPathComponent("command.txt"), encoding: .utf8)) ?? ""
                 if command == "stop" { if runtime?.stop() != false { NSApp.terminate(nil) }; return }
+                if command == "capture" {
+                    try? trace.start(at: root, runtime: runtime)
+                    try? "running".write(to: root.appendingPathComponent("command.txt"), atomically: true, encoding: .utf8)
+                }
                 if command == "measure" {
                     baselineCPU = cpu(); baselineTime = ProcessInfo.processInfo.systemUptime
                     try? "running".write(to: root.appendingPathComponent("command.txt"), atomically: true, encoding: .utf8)
@@ -130,12 +208,15 @@ struct LiveInputHarness {
                         lastScene = runtime.testMissionControl; history.append(state)
                         try? JSONSerialization.data(withJSONObject: history, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("scene-history.json"), options: .atomic)
                     }
-                    try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("probe-state.json"), options: .atomic)
+                    let packet = StatePacket(state)
+                    stateQueue.async {
+                        try? JSONSerialization.data(withJSONObject: packet.state, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("probe-state.json"), options: .atomic)
+                    }
                 }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         NSApp.run()
-        withExtendedLifetime((delegate, runtime, window, timer)) {}
+        withExtendedLifetime((delegate, runtime, window, timer, trace)) {}
     }
 }

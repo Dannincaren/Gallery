@@ -22,6 +22,9 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("normal loop survives brief cursor-region rebuilds", regression.testNormalLoopSurvivesBriefCursorRegionRebuilds),
+    ("counter credits handle delayed callbacks, publication and wrap", regression.testCounterCreditsHandleBothPublicationOrdersAndWrap),
+    ("animation deadlines retain sub-polling precision", regression.testAnimationDeadlinesAreNotRoundedToPollingIntervals),
     ("shared drag images prefer primary arrow and link roles", regression.testSharedDragImagesPreferPrimaryRoles),
     ("shake has one smooth monotonic shrink without retrigger", regression.testShakeEnvelopeDoesNotRestartAndShrinksSmoothly),
     ("high-resolution static cursor returns to arrow", regression.testHighResolutionStaticCursorObservation),

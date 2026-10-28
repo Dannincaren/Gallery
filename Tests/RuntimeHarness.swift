@@ -7,6 +7,15 @@ import GalleryNative
 @main @MainActor
 struct RuntimeHarness {
     static func verify(_ value: Bool, _ reason: String) throws { if !value { throw ThemeError.invalid(reason) } }
+    static func matches(_ snapshot: GLCursorSnapshot, registered: [String: Any], source: Data? = nil) -> Bool {
+        guard let actual = CursorFingerprint(image: snapshot.image, width: snapshot.size.width, height: snapshot.size.height,
+            hotX: snapshot.hotSpot.x, hotY: snapshot.hotSpot.y), let data = registered["Representations"] as? [Data],
+            let clip = try? CursorImages.fromCape(registered) else { return false }
+        return (data + (source.map { [$0] } ?? [])).contains { image in
+            guard let expected = CursorFingerprint(data: image, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY) else { return false }
+            return actual.distance(to: expected) <= 0.012
+        }
+    }
     static func pump(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
     static func cpu() -> Double {
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
@@ -30,6 +39,7 @@ struct RuntimeHarness {
             let clip = CursorClip(frames: data, frameDuration: 0.1, hotX: 3, hotY: 3)
             let prepared = try PreparedCursors(roles: [CursorRole(id: "test", name: "Test", clips: ["normal": clip])]).clip(role: "test", motion: .normal)!
             let start = ProcessInfo.processInfo.systemUptime
+            var colorSeeds: [Int32] = []
             for i in 0..<3 {
                 renderer.present(prepared, role: "test", motion: .normal, scale: 1, started: start, now: start + Double(i) * 0.1 + 0.001)
                 let until = ProcessInfo.processInfo.systemUptime + 0.1
@@ -41,8 +51,12 @@ struct RuntimeHarness {
                     pump(0.002)
                 } while ProcessInfo.processInfo.systemUptime < until
                 try verify(displayed, "系统通道没有显示第 \(i) 帧")
+                let seed = GLCursorBridge.cursorSeed(); colorSeeds.append(seed)
+                try verify(renderer.confirmDisplayed(seed: seed, revision: renderer.imageRevision), "无法确认三色检查的当前图像")
                 try verify(GLCursorBridge.cursorVisibility() != 0, "更新图像隐藏了系统光标")
             }
+            try verify(!renderer.owns(seed: colorSeeds[0]) && !renderer.owns(seed: colorSeeds[1]) && renderer.owns(seed: colorSeeds[2]),
+                       "同角色的旧动画帧仍被误当成当前画面")
             for i in 0..<300 {
                 renderer.present(prepared, role: i % 2 == 0 ? "arrow" : "link", motion: .normal,
                                  scale: i % 2 == 0 ? 1 : 1.5, started: start, now: start)
@@ -56,9 +70,26 @@ struct RuntimeHarness {
             renderer.present(repeated, role: "repeat", motion: .normal, scale: 1, started: start, now: start + 0.11)
             try verify(renderer.submissions == submitted, "重复帧仍重复提交")
             try verify(abs((renderer.nextFrameDeadline ?? 0) - (start + 0.2)) < 0.001, "跳过重复帧改变了停留时长")
+            let denseClip = CursorClip(frames: [data[0], data[1], data[2], data[0], data[1], data[2], data[0], data[1], data[2]], frameDuration: 0.005)
+            let dense = try PreparedCursors(roles: [CursorRole(id: "dense", name: "Dense", clips: ["normal": denseClip])]).clip(role: "dense", motion: .normal)!
+            renderer.present(dense, role: "dense", motion: .normal, scale: 1, started: start, now: start + 0.034)
+            try verify(abs((renderer.nextFrameDeadline ?? 0) - (start + 0.05)) < 0.00001,
+                       "迟到帧使 60Hz 调度漂移")
             renderer.stop(restoring: initial)
-            print("PASS native frames, 300 switches, visibility and independent geometry")
+            let releaseStart = ProcessInfo.processInfo.systemUptime
+            renderer.present(prepared, role: "test", motion: .release, scale: 1, started: releaseStart, now: releaseStart)
+            renderer.adoptReleaseFrame(1, role: "test", started: releaseStart, now: releaseStart + 0.006, clip: clip)
+            renderer.present(prepared, role: "test", motion: .release, scale: 1, started: releaseStart, now: releaseStart + 0.007)
+            try verify(renderer.displayedFrame == data[1], "已出现的后续松手帧又退回首帧")
+            try verify(abs((renderer.nextFrameDeadline ?? 0) - (releaseStart + 0.106)) < 0.00001,
+                       "接续已有帧改变了后续帧停留时长")
+            renderer.present(prepared, role: "test", motion: .release, scale: 1, started: releaseStart, now: releaseStart + 0.12)
+            try verify(renderer.displayedFrame == data[2], "接续已有帧后松手动画不再向前推进")
+            renderer.stop(restoring: initial)
+            print("PASS native frames, 300 switches, phase-aligned cadence, visibility and independent geometry")
+            print("PASS visible release progress never rewinds; remaining frame duration preserved")
             let foreground = NSCursor(image: NSImage(cgImage: try CursorImages.bitmap(data[2]), size: NSSize(width: 32, height: 32)), hotSpot: .zero)
+            try verify(GLCursorBridge.setBackgroundCursorUpdates(true) == 0, "无法启用诊断前台图像提交")
             _ = GLCursorBridge.present(foreground); pump(0.01)
             let foregroundSeed = GLCursorBridge.cursorSeed()
             renderer.testDelayedSeed = true
@@ -68,7 +99,7 @@ struct RuntimeHarness {
             pump(0.01)
             var confirmed = false
             let acknowledgment = CursorRecognition(matcher: CursorMatcher())
-            acknowledgment.probe(pendingImage: pending.fingerprint) { seed, _, ownImage in
+            acknowledgment.probe(pendingImage: pending.fingerprint) { seed, _, ownImage, _ in
                 DispatchQueue.main.async { confirmed = ownImage && renderer.confirmPending(seed: seed, revision: pending.revision) }
             }
             pump(0.1)
@@ -129,6 +160,74 @@ struct RuntimeHarness {
             engine.testPhysicalDown = false; engine.injectObserved(.leftMouseUp)
             try verify(engine.testMotion == .release, "快速松手未立即抢占按住"); engine.testPhysicalDown = nil
             var testedFamilies = Set<String>()
+            pump(0.25)
+            let copyNormal = GLCursorBridge.readCursor("com.apple.cursor.5")!
+            let linkNormal = GLCursorBridge.readCursor(link)!
+            engine.testPhysicalDown = true; engine.testIdentify([arrow]); pump(0.003)
+            engine.injectObserved(.leftMouseDown); pump(0.12)
+            try verify(engine.testMotion == .hold, "拖放交接检查尚未进入按住")
+            try verify(GLCursorBridge.selectCursorIdentifier("com.apple.cursor.5") == 0, "无法在松手回调前重选拖放入口")
+            pump(0.004)
+            guard let preUp = GLCursorBridge.currentSnapshot() else { throw ThemeError.invalid("无法读取松手回调前的拖放图像") }
+            let expectedHold = try CursorImages.capeDictionary(theme.roles.first(where: { $0.id == arrow })!.clip(.hold)!)
+            try verify(matches(preUp, registered: expectedHold, source: theme.roles.first(where: { $0.id == arrow })!.clip(.hold)!.frames[0]),
+                "Finder 在松手回调前重选拖放入口时会先闪回常态")
+            let heldSubmissions = engine.testSubmissions
+            pump(0.22)
+            try verify(engine.testSubmissions == heldSubmissions, "静态按住仍持续重交注册资源")
+            engine.testPhysicalDown = false; engine.injectObserved(.leftMouseUp)
+            guard let currentRelease = GLCursorBridge.readCursor(arrow), let copyEntry = GLCursorBridge.readCursor("com.apple.cursor.5") else {
+                throw ThemeError.invalid("未能读取松手与拖放注册入口")
+            }
+            let releaseImage = try CursorImages.fromCape(currentRelease), copyImage = try CursorImages.fromCape(copyEntry)
+            try verify(CursorImages.signature(releaseImage.frames[0], hotX: releaseImage.hotX, hotY: releaseImage.hotY, width: releaseImage.width, height: releaseImage.height)
+                == CursorImages.signature(copyImage.frames[0], hotX: copyImage.hotX, hotY: copyImage.hotY, width: copyImage.width, height: copyImage.height),
+                "Finder 复制拖放入口仍指向常态图像，可在松手中途插回常态")
+            try verify((currentRelease["FrameCount"] as? NSNumber)?.intValue == 1 && (copyEntry["FrameCount"] as? NSNumber)?.intValue == 1,
+                       "松手入口意外使用可重启的原生动画")
+            try verify(GLCursorBridge.selectCursorIdentifier("com.apple.cursor.5") == 0, "无法重选拖放入口")
+            pump(0.004)
+            guard let reselected = GLCursorBridge.currentSnapshot(), let dragFrame = GLCursorBridge.readCursor("com.apple.cursor.5") else {
+                throw ThemeError.invalid("无法读取重选拖放入口后的实际图像")
+            }
+            try verify(matches(reselected, registered: dragFrame, source: engine.renderedFrame),
+                "重选拖放入口后实际图像偏离当前松手帧")
+            let cachedNormal = try CursorImages.fromCape(copyNormal)
+            let cachedCursor = NSCursor(image: NSImage(cgImage: try CursorImages.bitmap(cachedNormal.frames[0]),
+                size: NSSize(width: cachedNormal.width, height: cachedNormal.height)),
+                hotSpot: NSPoint(x: cachedNormal.hotX, y: cachedNormal.hotY))
+            _ = GLCursorBridge.present(cachedCursor)
+            engine.testIdentify([arrow], applied: [arrow]); pump(0.005)
+            guard let cachedRecovery = GLCursorBridge.currentSnapshot(), let expectedRecovery = GLCursorBridge.readCursor(arrow) else {
+                throw ThemeError.invalid("无法读取缓存常态覆盖后的松手帧")
+            }
+            try verify(matches(cachedRecovery, registered: expectedRecovery, source: engine.renderedFrame),
+                "前台选择缓存常态后，更新注册入口没有恢复当前松手帧")
+            func imageKey(_ dictionary: [String: Any]) throws -> String {
+                let clip = try CursorImages.fromCape(dictionary)
+                guard let key = CursorImages.signature(clip.frames[0], hotX: clip.hotX, hotY: clip.hotY, width: clip.width, height: clip.height) else {
+                    throw ThemeError.invalid("注册光标没有有效图像指纹")
+                }
+                return key
+            }
+            try verify(try imageKey(GLCursorBridge.readCursor(link)!) == imageKey(linkNormal), "箭头松手覆盖了不同的链接常态")
+            let uninterruptedRelease = engine.testMotionStartedAt
+            pump(0.04)
+            let oldRelease = NSCursor(image: NSImage(cgImage: try CursorImages.bitmap(copyImage.frames[0]),
+                size: NSSize(width: copyImage.width, height: copyImage.height)),
+                hotSpot: NSPoint(x: copyImage.hotX, y: copyImage.hotY))
+            engine.testRecognitionSuspended = false
+            _ = GLCursorBridge.present(oldRelease); pump(0.04)
+            engine.testRecognitionSuspended = true
+            try verify(engine.testMotion == .release && engine.testMotionStartedAt == uninterruptedRelease,
+                       "旧帧重选改变了当前松手阶段或起点")
+            guard let afterOldFrame = GLCursorBridge.currentSnapshot(), let expectedCurrentFrame = GLCursorBridge.readCursor(arrow) else {
+                throw ThemeError.invalid("无法读取旧帧重选后的画面")
+            }
+            try verify(matches(afterOldFrame, registered: expectedCurrentFrame, source: engine.renderedFrame), "旧松手首帧重选后没有继续当前帧")
+            pump(0.25)
+            try verify(try imageKey(GLCursorBridge.readCursor("com.apple.cursor.5")!) == imageKey(copyNormal), "拖放入口未还原其独立常态")
+            print("PASS equivalent drag entry mirrors static release frame; other roles isolated; normals restored")
             for role in theme.roles where !CursorCatalog.assetOnly(role.id) && role.clip(.hold) != nil {
                 guard testedFamilies.insert(CursorCatalog.family(role.id)).inserted else { continue }
                 engine.testIdentify([role.id]); engine.testPhysicalDown = true
@@ -157,9 +256,32 @@ struct RuntimeHarness {
             print("PERF staticCPU=\((cpu() - beforeCPU) / (ProcessInfo.processInfo.systemUptime - beforeTime) * 100) ticks=\(engine.tickCount - beforeTicks)")
             try verify(engine.tickCount - beforeTicks < 60, "静态指针仍在高频唤醒")
             engine.testIdentify(["com.apple.coregraphics.IBeam"])
+            let textEpoch = engine.testMotionStartedAt
+            for _ in 0..<20 {
+                guard let textFrame = GLCursorBridge.readCursor("com.apple.coregraphics.IBeam") else { throw ThemeError.invalid("无法读取文字当前帧") }
+                let sourceFrame = engine.renderedFrame
+                _ = GLCursorBridge.selectCursorIdentifier("com.apple.coregraphics.IBeam")
+                let until = ProcessInfo.processInfo.systemUptime + 0.04
+                var sameImage = false
+                repeat {
+                    if let snapshot = GLCursorBridge.currentSnapshot(), matches(snapshot, registered: textFrame, source: sourceFrame) { sameImage = true; break }
+                } while ProcessInfo.processInfo.systemUptime < until
+                try verify(sameImage, "文字角色重选后图像与当前动画帧不一致")
+                engine.injectObserved(.mouseMoved); pump(0.012)
+            }
+            try verify(engine.testMotionStartedAt == textEpoch, "在文字中移动重置了常态动画起点")
+            try verify((GLCursorBridge.readCursor("com.apple.coregraphics.IBeam")?["FrameCount"] as? NSNumber)?.intValue == 1,
+                       "文字常态仍登记为可在移动时从头播放的原生循环")
+            print("PASS repeated text cursor selection preserves animation epoch and registered current frame")
             let animationCPU = cpu(), animationTime = ProcessInfo.processInfo.systemUptime
-            pump(3)
-            print("PERF animatedCPU=\((cpu() - animationCPU) / (ProcessInfo.processInfo.systemUptime - animationTime) * 100)")
+            let animationSubmissions = engine.testSubmissions
+            for _ in 0..<180 {
+                // Keep this own-process benchmark's role controlled even if
+                // the user's foreground app rebuilds its cursor regions.
+                engine.testIdentify(["com.apple.coregraphics.IBeam"]); pump(1.0 / 60)
+            }
+            print("PERF animatedCPU=\((cpu() - animationCPU) / (ProcessInfo.processInfo.systemUptime - animationTime) * 100) submissions=\(engine.testSubmissions - animationSubmissions)")
+            try verify(engine.testSubmissions - animationSubmissions > 30, "文字动画性能采样没有实际持续播放")
             engine.testScene(true); pump(0.03)
             try verify(GLCursorBridge.cursorVisibility() != 0 && engine.testMissionControl, "调度中心路径丢失光标")
             engine.testScene(false); pump(0.03)
@@ -181,8 +303,27 @@ struct RuntimeHarness {
             }
             print("PASS resize-to-native-arrow restoration")
             try verify(engine.stop() && !engine.hasRecovery, "停用未恢复备份")
+            var separateTheme = theme
+            for index in separateTheme.roles.indices where separateTheme.roles[index].id == "com.apple.cursor.5" {
+                separateTheme.roles[index].scale = 1.4
+            }
+            engine.start(separateTheme); engine.testRecognitionSuspended = true
+            try verify(engine.enabled, engine.error ?? "独立拖放大小启用失败")
+            let separateCopy = GLCursorBridge.readCursor("com.apple.cursor.5")!
+            engine.testIdentify([arrow]); engine.testPhysicalDown = true; engine.injectObserved(.leftMouseDown)
+            engine.testPhysicalDown = false; engine.injectObserved(.leftMouseUp)
+            try verify(try imageKey(GLCursorBridge.readCursor("com.apple.cursor.5")!) == imageKey(separateCopy),
+                       "相同素材但不同尺寸的拖放角色被错误合并")
+            try verify(engine.stop() && !engine.hasRecovery, "独立拖放检查未恢复备份")
+            print("PASS different-size drag role stays independent during arrow release")
             print("PASS runtime role isolation, click interruption, self-seed filtering, static wakeups and restore")
         } catch {
+            if let snapshot = GLCursorBridge.currentSnapshot(), let data = try? CursorImages.png(snapshot.image) {
+                try? data.write(to: root.appendingPathComponent("failure-cursor.png"))
+                let info: [String: Any] = ["width": snapshot.size.width, "height": snapshot.size.height,
+                    "hotX": snapshot.hotSpot.x, "hotY": snapshot.hotSpot.y, "seed": snapshot.seed]
+                try? JSONSerialization.data(withJSONObject: info).write(to: root.appendingPathComponent("failure-cursor.json"))
+            }
             if let runtime, let details = try? JSONSerialization.data(withJSONObject: runtime.testStats, options: [.prettyPrinted, .sortedKeys]) {
                 try? details.write(to: root.appendingPathComponent("failure.json"))
             }

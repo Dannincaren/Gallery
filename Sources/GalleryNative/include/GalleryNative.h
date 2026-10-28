@@ -3,6 +3,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 @class NSCursor;
+@interface GLCursorResource : NSObject
+@end
 @interface GLCursorSnapshot : NSObject
 @property(nonatomic, readonly) CGImageRef image;
 @property(nonatomic, readonly) CGSize size;
@@ -21,6 +23,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setDockCursorOverride:(BOOL)enabled;
 + (int32_t)registerCursor:(NSDictionary<NSString *, id> *)cursor identifier:(NSString *)identifier;
 + (int32_t)updateCursor:(NSDictionary<NSString *, id> *)cursor identifier:(NSString *)identifier refresh:(BOOL)refresh;
++ (nullable GLCursorResource *)prepareCursor:(NSDictionary<NSString *, id> *)cursor;
++ (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers;
++ (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers showImmediately:(BOOL)show;
++ (int32_t)selectCursorIdentifier:(NSString *)identifier;
 + (int32_t)cursorSeed;
 + (nullable NSDictionary<NSString *, id> *)standardCursor:(NSString *)identifier;
 + (int32_t)setBackgroundCursorUpdates:(BOOL)enabled;

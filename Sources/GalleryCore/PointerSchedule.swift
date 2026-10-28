@@ -8,8 +8,8 @@ public enum PointerSchedule {
         if paused { return 1 }
         var delay = polling ? 1.0 / 120 : 0.2
         for deadline in [frameDeadline, transitionDeadline, idleDeadline].compactMap({ $0 }) where deadline > now {
-            delay = min(delay, max(1.0 / 120, deadline - now))
+            delay = min(delay, max(0.001, deadline - now))
         }
-        return max(1.0 / 120, delay)
+        return max(0.001, delay)
     }
 }

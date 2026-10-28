@@ -11,10 +11,11 @@ swiftc -O -swift-version 5 -target "$(uname -m)-apple-macosx14.0" -D GALLERY_RUN
     Sources/GalleryApp/CursorRecognition.swift Sources/GalleryApp/PreparedCursor.swift Sources/GalleryApp/SystemSceneMonitor.swift Tests/LiveInputHarness.swift \
     "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build/CursorBridge.m.o" \
     -framework AppKit -framework ApplicationServices -o .build/live-check/LiveInputChecks
-python3 - "$1" "$2" <<'PY'
+python3 - "$1" "$2" "${3:-}" <<'PY'
 import pathlib,sys,plistlib,json,shutil
 root=pathlib.Path(sys.argv[1]).resolve();root.mkdir(parents=True,exist_ok=True)
 config=dict(directory=str(root),theme=str(pathlib.Path(sys.argv[2]).resolve()))
+if sys.argv[3]=='--trace-only': config.update(traceOnly='1',scale='1.86')
 for name,suffix in [('Gallery Input Probe','Probe'),('Gallery Test Surface','Fixture')]:
  app=root/(name+'.app');(app/'Contents/MacOS').mkdir(parents=True,exist_ok=True);(app/'Contents/Resources').mkdir(exist_ok=True)
  shutil.copy2('.build/live-check/LiveInputChecks',app/'Contents/MacOS/LiveInputChecks')

@@ -79,6 +79,16 @@ static void loadSymbols(void) {
 - (void)dealloc { CGImageRelease(_image); }
 @end
 
+@interface GLCursorResource ()
+@property(nonatomic, strong) NSArray *images;
+@property(nonatomic) CGSize size;
+@property(nonatomic) CGPoint hotSpot;
+@property(nonatomic) NSUInteger count;
+@property(nonatomic) CGFloat duration;
+@end
+@implementation GLCursorResource
+@end
+
 @implementation GLCursorBridge
 + (BOOL)available {
     loadSymbols();
@@ -266,6 +276,50 @@ static void loadSymbols(void) {
 }
 + (int32_t)registerCursor:(NSDictionary *)cursor identifier:(NSString *)identifier {
     return [self updateCursor:cursor identifier:identifier refresh:YES];
+}
++ (GLCursorResource *)prepareCursor:(NSDictionary *)cursor {
+    NSUInteger count = [cursor[@"FrameCount"] unsignedIntegerValue];
+    CGFloat duration = [cursor[@"FrameDuration"] doubleValue];
+    CGSize size = CGSizeMake([cursor[@"PointsWide"] doubleValue], [cursor[@"PointsHigh"] doubleValue]);
+    CGPoint hot = CGPointMake([cursor[@"HotSpotX"] doubleValue], [cursor[@"HotSpotY"] doubleValue]);
+    if (count < 1 || count > 24 || !isfinite(duration) || duration <= 0 ||
+        !isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0 ||
+        !isfinite(hot.x) || !isfinite(hot.y) || hot.x < 0 || hot.y < 0 || hot.x >= size.width || hot.y >= size.height) return nil;
+    NSMutableArray *images = [NSMutableArray array];
+    for (NSData *data in cursor[@"Representations"]) {
+        NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:data];
+        if (!rep.CGImage || rep.pixelsHigh % count != 0) return nil;
+        [images addObject:(__bridge id)rep.CGImage];
+    }
+    if (!images.count) return nil;
+    GLCursorResource *resource = [GLCursorResource new];
+    resource.images = images; resource.size = size; resource.hotSpot = hot;
+    resource.count = count; resource.duration = duration;
+    return resource;
+}
++ (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers {
+    return [self applyPreparedCursor:cursor identifiers:identifiers showImmediately:NO];
+}
++ (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers showImmediately:(BOOL)show {
+    if (![self available]) return -10001;
+    BOOL wasBackground = backgroundUpdatesEnabled && !show;
+    if (wasBackground) [self setBackgroundCursorUpdates:NO];
+    int result = 0;
+    for (NSString *identifier in identifiers) {
+        if (!identifier.length) { result = -10002; break; }
+        int seed = 0;
+        result = registerFn(connectionFn(), identifier.UTF8String, true, true, cursor.size, cursor.hotSpot,
+            cursor.count, cursor.duration, (__bridge CFArrayRef)cursor.images, &seed);
+        if (result) break;
+    }
+    if (wasBackground) [self setBackgroundCursorUpdates:YES];
+    return result;
+}
++ (int32_t)selectCursorIdentifier:(NSString *)identifier {
+    loadSymbols();
+    if (!connectionFn || !selectFn) return -10001;
+    int seed = 0;
+    return selectFn(connectionFn(), identifier.UTF8String, &seed);
 }
 + (int32_t)updateCursor:(NSDictionary *)cursor identifier:(NSString *)identifier refresh:(BOOL)refresh {
     if (![self available]) return -10001;

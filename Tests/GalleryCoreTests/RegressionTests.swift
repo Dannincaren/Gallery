@@ -3,6 +3,44 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testNormalLoopSurvivesBriefCursorRegionRebuilds() {
+        var clocks = RoleAnimationClocks()
+        expectEqual(clocks.start(for: "text", suggested: 1, now: 1), 1)
+        expectEqual(clocks.start(for: "text", suggested: 1, now: 1.2), 1)
+        expectEqual(clocks.start(for: "arrow", suggested: 1.21, now: 1.21), 1.21)
+        expectEqual(clocks.start(for: "text", suggested: 1.22, now: 1.22), 1)
+        expectEqual(clocks.start(for: "text", suggested: 2, now: 2), 2)
+        clocks.reset()
+        expectEqual(clocks.start(for: "text", suggested: 2.01, now: 2.01), 2.01)
+    }
+    func testCounterCreditsHandleBothPublicationOrdersAndWrap() {
+        var ledger = MouseCounterLedger(downs: 0, ups: 0)
+        ledger.acknowledge(.down)
+        expectEqual(ledger.poll(downs: 0, ups: 0, isDown: true), [])
+        expectEqual(ledger.poll(downs: 1, ups: 0, isDown: true), [])
+        ledger.acknowledge(.up)
+        expectEqual(ledger.poll(downs: 1, ups: 1, isDown: false), [])
+        // A genuinely missed long-drag edge still reaches the fallback.
+        expectEqual(ledger.poll(downs: 2, ups: 1, isDown: true), [.down])
+        expectEqual(ledger.poll(downs: 2, ups: 2, isDown: false), [.up])
+        expectEqual(ledger.poll(downs: 3, ups: 3, isDown: false), [.down, .up])
+        expectEqual(ledger.poll(downs: 5, ups: 4, isDown: true), [.up, .down])
+        var wrapped = MouseCounterLedger(downs: .max, ups: .max)
+        wrapped.acknowledge(.down); wrapped.acknowledge(.up)
+        expectEqual(wrapped.poll(downs: 0, ups: 0, isDown: false), [])
+        expectEqual(wrapped.poll(downs: 1, ups: 1, isDown: false), [.down, .up])
+        var beforeCallback = MouseCounterLedger(downs: 10, ups: 10)
+        // The counter is already incremented when the callback acknowledges it.
+        beforeCallback.acknowledge(.down); beforeCallback.acknowledge(.up)
+        expectEqual(beforeCallback.poll(downs: 11, ups: 11, isDown: false), [])
+        expectEqual(beforeCallback.poll(downs: 11, ups: 11, isDown: false), [])
+    }
+    func testAnimationDeadlinesAreNotRoundedToPollingIntervals() {
+        expectEqual(PointerSchedule.delay(now: 10, polling: false, paused: false,
+            frameDeadline: 10.002, transitionDeadline: nil, idleDeadline: nil), 0.002, accuracy: 0.000001)
+        expectEqual(PointerSchedule.delay(now: 10, polling: false, paused: false,
+            frameDeadline: nil, transitionDeadline: 10.0002, idleDeadline: nil), 0.001, accuracy: 0.000001)
+    }
     func testSharedDragImagesPreferPrimaryRoles() throws {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)])
         for order in [["com.apple.coregraphics.Alias", "com.apple.cursor.13"], ["com.apple.cursor.13", "com.apple.coregraphics.Alias"]] {
