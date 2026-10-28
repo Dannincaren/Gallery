@@ -120,7 +120,10 @@ public enum ThemeFiles {
         try theme.validate()
         // Validate image data at the import boundary, before a native call.
         var checked = Set<Data>()
-        for role in theme.roles { for clip in role.clips.values { for frame in clip.frames where checked.insert(frame).inserted { _ = try CursorImages.bitmap(frame) } } }
+        for role in theme.roles {
+            let clips = Array(role.clips.values) + role.variants.values.flatMap { $0.map(\.clip) }
+            for clip in clips { for frame in clip.frames where checked.insert(frame).inserted { _ = try CursorImages.bitmap(frame) } }
+        }
         return theme
     }
     public static func save(_ theme: GalleryTheme, to url: URL) throws {

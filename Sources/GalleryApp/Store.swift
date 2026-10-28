@@ -114,6 +114,39 @@ final class GalleryStore: ObservableObject {
             edit { $0 = clip }; return inserted
         } catch { message = error.localizedDescription; return nil }
     }
+    func selectVariant(_ id: String, for motion: Motion) {
+        guard !runtime.enabled, let index = roleIndex else { return }
+        var role = theme.roles[index]; role.selectVariant(id, for: motion)
+        copyVariants(role, motion: motion)
+        changed()
+    }
+    private func copyVariants(_ role: CursorRole, motion: Motion) {
+        let family = CursorCatalog.family(role.id), key = motion.rawValue
+        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family {
+            theme.roles[i].clips[key] = role.clips[key]
+            theme.roles[i].variants[key] = role.variants[key]
+            theme.roles[i].selectedVariants[key] = role.selectedVariants[key]
+        }
+    }
+    func addVariant(_ clip: CursorClip, name: String, for motion: Motion) throws {
+        guard !runtime.enabled, let index = roleIndex else { return }
+        try clip.validate()
+        let key = motion.rawValue
+        guard (theme.roles[index].variants[key]?.count ?? 0) < 31 else { throw ThemeError.invalid("每个状态最多保留 32 套素材。") }
+        let id = UUID().uuidString
+        var role = theme.roles[index]
+        role.variants[key, default: []].append(CursorVariant(id: id, name: name, clip: clip))
+        role.selectVariant(id, for: motion); copyVariants(role, motion: motion)
+        changed()
+    }
+    func importVariant() {
+        guard !runtime.enabled else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .data]; panel.allowsMultipleSelection = false
+        panel.message = "为「\(selectedMotion.title)」添加另一套素材，保留已有版本。支持 PNG、GIF、CUR、ANI。"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try addVariant(AnimationImport.read(url), name: url.lastPathComponent, for: selectedMotion) }
+        catch { message = error.localizedDescription }
+    }
     func createClip() {
         guard !runtime.enabled, let index = roleIndex else { return }
         let family = CursorCatalog.family(theme.roles[index].id), clip = theme.roles[index].clip(.normal)

@@ -10,6 +10,7 @@ final class MouseObservation {
     private(set) var active = false
     private(set) var latestTimestamp = 0.0
     private(set) var latestPosition = CGPoint.zero
+    private(set) var latestWindowID: CGWindowID = 0
     private(set) var deliveredEvents = 0
     private var displayHeight = 0.0
     var description: String { tap != nil ? "会话鼠标监听" : (active ? "系统鼠标事件监听" : "鼠标计数回退") }
@@ -32,6 +33,7 @@ final class MouseObservation {
     }
     private func receive(_ event: NSEvent) {
         guard let cg = event.cgEvent else { return }
+        latestWindowID = CGWindowID(truncatingIfNeeded: cg.getIntegerValueField(.mouseEventWindowUnderMousePointer))
         deliver(cg.type, timestamp: event.timestamp, position: cg.location)
     }
     private func deliver(_ type: CGEventType, timestamp: Double, position: CGPoint) {
@@ -53,6 +55,7 @@ final class MouseObservation {
                         if let tap = observer.tap { CGEvent.tapEnable(tap: tap, enable: true) }
                         observer.active = observer.tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false
                     } else {
+                        observer.latestWindowID = CGWindowID(truncatingIfNeeded: event.getIntegerValueField(.mouseEventWindowUnderMousePointer))
                         observer.deliver(type, timestamp: Double(event.timestamp) / 1_000_000_000, position: event.location)
                     }
                 }

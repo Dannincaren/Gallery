@@ -95,6 +95,14 @@ final class ImportTests {
             }
         }
         let arrow = try require(theme.roles.first { $0.id == "com.apple.coregraphics.Arrow" })
+        for id in ["com.apple.coregraphics.IBeam", "com.apple.cursor.23", "com.apple.cursor.19", "com.apple.cursor.3", "com.apple.cursor.4"] {
+            let role = try require(theme.roles.first { $0.id == id })
+            let choices = try require(role.variants[Motion.normal.rawValue])
+            expectGreater(choices.count, 1)
+            expectFalse(choices.filter { $0.clip.frames.count == 1 }.isEmpty)
+            expectFalse(choices.filter { $0.clip.frames.count > 1 }.isEmpty)
+            expectEqual(role.clip(.normal), choices.first?.clip)
+        }
         for motion in Motion.allCases { expectNotNil(arrow.clip(motion)) }
         let clip = try require(arrow.clip(.press))
         expectGreater(clip.frames.count, 1)
@@ -103,5 +111,31 @@ final class ImportTests {
         let dictionary = try CursorImages.capeDictionary(clip)
         let roundtrip = try CursorImages.fromCape(dictionary)
         expectEqual(roundtrip.duration, clip.duration, accuracy: 0.000001)
+    }
+    func testVariantsPreserveEditsAndArchiveWithoutSourceFiles() throws {
+        let red = try frame(.red), blue = try frame(.blue)
+        let still = CursorClip(frames: [red]), animated = CursorClip(frames: [red, blue])
+        var role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": still],
+            variants: ["normal": [CursorVariant(id: "still", name: "静态", clip: still), CursorVariant(id: "animation", name: "动态", clip: animated)]],
+            selectedVariants: ["normal": "still"])
+        role.clips["normal"]?.hotX = 7
+        role.selectVariant("animation", for: .normal)
+        expectEqual(role.clip(.normal), animated)
+        role.selectVariant("still", for: .normal)
+        expectEqual(role.clip(.normal)?.hotX, 7)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("theme.gallery")
+        let theme = GalleryTheme(name: "Variants", roles: [role])
+        try ThemeFiles.save(theme, to: url)
+        expectEqual(try ThemeFiles.load(url), theme)
+        var invalid = theme; invalid.roles[0].selectedVariants["normal"] = "missing"
+        expectThrows(try invalid.validate())
+        var original = CursorRole(id: role.id, name: role.name, clips: ["normal": still])
+        original.variants["normal"] = [CursorVariant(id: "animation", name: "动态", clip: animated)]
+        original.selectVariant("animation", for: .normal)
+        expectEqual(original.variants["normal"]?.count, 2)
+        expectEqual(original.variants["normal"]?.last?.clip, still)
     }
 }

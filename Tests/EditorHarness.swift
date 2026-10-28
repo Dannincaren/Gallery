@@ -71,6 +71,20 @@ struct EditorHarness {
             reopened.setRoleIdleDelay(nil, for: roleIDs[2]); reopened.saveNow(wait: true)
             try verify(try ThemeFiles.load(selectedURL).roles.allSatisfy { $0.idleDelayOverride == nil }, "恢复全局待机默认值失败")
             print("PASS per-role idle override, alias persistence and default restoration")
+            reopened.selectedRole = roleIDs[2]; reopened.selectedMotion = .normal
+            var alternate = clip; alternate.frames = [png]; alternate.hotX = 4
+            try reopened.addVariant(alternate, name: "静态", for: .normal)
+            try verify(reopened.theme.roles[2].variants == reopened.theme.roles[4].variants, "同族初始素材的版本标识不一致")
+            try verify(reopened.theme.roles[1].variants.isEmpty && reopened.theme.roles[3].variants.isEmpty, "可选素材串到其他角色")
+            let oldID = reopened.theme.roles[2].variants["normal"]!.last!.id
+            reopened.edit { $0.hotY = 6 }
+            reopened.selectVariant(oldID, for: .normal)
+            try verify(reopened.clip == clip && reopened.theme.roles[4].clip(.normal) == clip, "切回原有素材丢失或别名不同步")
+            let newID = reopened.theme.roles[2].variants["normal"]!.first!.id
+            reopened.selectVariant(newID, for: .normal); reopened.saveNow(wait: true)
+            let variantsSaved = try ThemeFiles.load(selectedURL)
+            try verify(variantsSaved.roles[2].clip(.normal)?.hotY == 6 && variantsSaved.roles[2].variants["normal"]?.count == 2, "素材切换未保留编辑或未独立保存")
+            print("PASS variant switching preserves aliases, edits, other roles and portable assets")
             print("Editor checks passed; no user library or login settings changed")
         } catch { print("FAIL:", error.localizedDescription); exit(1) }
     }

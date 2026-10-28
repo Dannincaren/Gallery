@@ -33,6 +33,7 @@ final class CursorRuntime: ObservableObject {
     private var lastWatchdog = 0.0
     private var lastCornerCheck = 0.0
     private var counterGesture = false
+    private var dockGesture = false
     private var lastLeftEdge = -Double.infinity
     private var lastLeftDown = 0.0
     private var lastLeftUp = 0.0
@@ -238,7 +239,7 @@ final class CursorRuntime: ObservableObject {
         } else { error = "部分光标恢复失败，恢复记录已保留。请再次恢复，必要时注销登录。"; status = "需要恢复光标" }
         roleAliases.removeAll(); roles.removeAll(); canonicalRoles.removeAll(); normal.removeAll(); prepared = nil
         roleID = nil; theme = nil; registeredMatch = false; registeredScales.removeAll(); shake.reset()
-        machine.reset(now: now); lastProbe = 0; lastSeed = -1
+        machine.reset(now: now); lastProbe = 0; lastSeed = -1; dockGesture = false
         return failures.isEmpty
     }
     func recover() {
@@ -448,7 +449,10 @@ final class CursorRuntime: ObservableObject {
         if role.usesNative || normal[role.id] == nil {
             renderer.passThrough(); updateStatus("\(role.name) · 系统原有光标"); return
         }
-        let motion: Motion = scenes.missionControl ? .normal : (role.clip(machine.motion) == nil ? .normal : machine.motion)
+        let interacting = [.press, .hold, .release].contains(machine.motion)
+        if !interacting { dockGesture = false }
+        let shellClick = (scenes.missionControl || dockGesture) && interacting
+        let motion: Motion = scenes.missionControl && !shellClick ? .normal : (role.clip(machine.motion) == nil ? .normal : machine.motion)
         let magnification = shakeEnabled ? shake.scale(at: now) : 1
         let scale = pointerScale * role.scale * magnification
         guard let clip = prepared?.clip(role: role.id, motion: motion) else { return }
@@ -472,9 +476,10 @@ final class CursorRuntime: ObservableObject {
         } else {
             let started = motion == .normal ? normalClocks.start(for: CursorCatalog.family(role.id), suggested: machine.motionStartedAt, now: now) : machine.motionStartedAt
             renderer.present(clip, role: role.id, motion: motion, scale: scale, started: started, now: now,
-                staticOnly: scenes.missionControl, synchronizeRegistration: magnification == 1 && abs(scale - (registeredScales[role.id] ?? -1)) < 0.005)
+                staticOnly: scenes.missionControl && !shellClick, synchronizeRegistration: magnification == 1 && abs(scale - (registeredScales[role.id] ?? -1)) < 0.005,
+                shell: shellClick)
         }
-        updateStatus(scenes.missionControl ? "调度中心 · 主题静态光标" : "\(role.name) · \(motion.title) · 系统光标通道")
+        updateStatus(scenes.missionControl ? "调度中心 · \(shellClick ? motion.title : "主题静态光标")" : "\(role.name) · \(motion.title) · 系统光标通道")
     }
     private func updateStatus(_ text: String) { if status != text { status = text } }
     private func synchronizeEditorCorner(at point: CGPoint) {
@@ -529,6 +534,7 @@ final class CursorRuntime: ObservableObject {
             #endif
             if type == .leftMouseDown {
                 lastLeftDown = timestamp
+                dockGesture = observed && scenes.isDockWindow(observation.latestWindowID)
                 normalClocks.reset()
                 machine.down(now: timestamp, pressDuration: currentRole?.clip(.press)?.duration, enabled: theme.clickEnabled,
                     split: currentRole?.splitClickAnimation ?? false, releaseDuration: currentRole?.clip(.release)?.duration)

@@ -38,6 +38,7 @@ final class SystemCursorRenderer {
     private var seedOrder: [Int32] = []
     private var lastKey: Key?
     private var backgroundOwned = false
+    private var shellOverride = false
     private var submissionRevision = 0
     var imageRevision: Int { submissionRevision }
     private var nativeSyncPending = false
@@ -157,14 +158,15 @@ final class SystemCursorRenderer {
         guardedIDs.removeAll(); guardedKey = nil; nativeGuardFingerprints.removeAll()
         nativeSyncPending = false
     }
-    private func synchronizeNative(_ prepared: PreparedClip, index: Int, key: Key, geometry: CursorClip, enabled: Bool, started: Double, now: Double) -> Bool {
+    private func synchronizeNative(_ prepared: PreparedClip, index: Int, key: Key, geometry: CursorClip, enabled: Bool, shell: Bool, started: Double, now: Double) -> Bool {
         // The foreground app may select its drag cursor before our up callback
         // runs. Arm the same static resource while held, so that handoff cannot
         // insert a normal image before release even starts. A static hold adds
         // no frame timer; only its entry or an actual foreground change submits.
-        let text = ["com.apple.coregraphics.IBeam", "com.apple.cursor.26"].contains(CursorCatalog.family(key.role))
+        let text = CursorCatalog.isText(key.role)
         let synchronized = key.motion == .hold || key.motion == .release
-            || (key.motion == .normal && text && prepared.frames.count > 1)
+            || (shell && key.motion == .press)
+            || (text && (key.motion != .normal || prepared.frames.count > 1))
         guard enabled, synchronized else { if !guardedIDs.isEmpty { restoreNativeNormals() }; return false }
         guard GLCursorBridge.cursorVisibility() != 0 else { return false }
         let familyIDs = nativeNormals.keys.filter { CursorCatalog.family($0) == CursorCatalog.family(key.role) }
@@ -182,7 +184,11 @@ final class SystemCursorRenderer {
         let begin = ProcessInfo.processInfo.systemUptime
         #endif
         guard GLCursorBridge.applyPreparedCursor(frame.resource, identifiers: ids, showImmediately: true) == 0 else { restoreNativeNormals(); return false }
-        _ = GLCursorBridge.present(frame.cursor)
+        // Updating a selected system text resource keeps its native identity.
+        // A custom NSCursor here makes Chromium reselect its cached IBeam on
+        // every mouse move and can insert its arrow/first frame in between.
+        // Interaction phases need the same path as the normal text loop.
+        if !text { _ = GLCursorBridge.present(frame.cursor) }
         guardedKey = key; nativeGuardFingerprints = frame.fingerprints
         // Even a changed return seed can belong to an earlier queued update.
         // Only an actual matching image can acknowledge this submission.
@@ -191,7 +197,8 @@ final class SystemCursorRenderer {
         #if GALLERY_RUNTIME_CHECKS
         let completed = ProcessInfo.processInfo.systemUptime
         frameRecords.append(["role": key.role, "motion": key.motion.rawValue, "index": index, "started": started, "at": now,
-            "nativeStatic": true, "paired": true, "completedAt": completed, "submitMs": (completed - begin) * 1000,
+            "nativeStatic": true, "paired": !text,
+            "completedAt": completed, "submitMs": (completed - begin) * 1000,
             "width": size.width, "height": size.height])
         if frameRecords.count > 500 { frameRecords.removeFirst() }
         #endif
@@ -199,7 +206,8 @@ final class SystemCursorRenderer {
     }
     func cancelPending() { pendingImage = nil; nativeSyncPending = false }
     func present(_ prepared: PreparedClip, role: String, motion: Motion, scale: Double,
-                 started: Double, now: Double, staticOnly: Bool = false, synchronizeRegistration: Bool = false) {
+                 started: Double, now: Double, staticOnly: Bool = false, synchronizeRegistration: Bool = false, shell: Bool = false) {
+        if shellOverride != shell { GLCursorBridge.setDockCursorOverride(shell); shellOverride = shell }
         let clip = prepared.clip
         let scaleKey = Int((scale * 100).rounded())
         var displayStart = started
@@ -226,7 +234,7 @@ final class SystemCursorRenderer {
         let key = Key(role: role, motion: motion, image: ObjectIdentifier(prepared.frames[index].image), scale: scaleKey)
         let geometry = clip.scaled(by: Double(key.scale) / 100)
         size = CGSize(width: geometry.width, height: geometry.height); displayedFrame = prepared.frames[index].data
-        if synchronizeNative(prepared, index: index, key: key, geometry: geometry, enabled: synchronizeRegistration && !staticOnly,
+        if synchronizeNative(prepared, index: index, key: key, geometry: geometry, enabled: synchronizeRegistration && !staticOnly, shell: shell,
                              started: started, now: now) { return }
         let seed = GLCursorBridge.cursorSeed()
         if lastKey == key && (owns(seed: seed) || pendingImage != nil) { return }
@@ -269,6 +277,7 @@ final class SystemCursorRenderer {
         #endif
     }
     func passThrough(frame: Data? = nil, size: CGSize = .zero) {
+        if shellOverride { GLCursorBridge.setDockCursorOverride(false); shellOverride = false }
         restoreNativeNormals()
         if backgroundOwned { _ = GLCursorBridge.setBackgroundCursorUpdates(false); backgroundOwned = false }
         lastKey = nil; pendingImage = nil; nextFrameDeadline = nil; displayedFrame = frame; self.size = size

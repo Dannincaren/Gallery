@@ -64,6 +64,13 @@ public struct CursorClip: Codable, Equatable {
     }
 }
 
+public struct CursorVariant: Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var clip: CursorClip
+    public init(id: String, name: String, clip: CursorClip) { self.id = id; self.name = name; self.clip = clip }
+}
+
 public struct CursorRole: Codable, Equatable, Identifiable {
     public var id: String
     public var name: String
@@ -75,13 +82,18 @@ public struct CursorRole: Codable, Equatable, Identifiable {
     public var usesNative: Bool
     public var sourceThemeName: String?
     public var idleDelayOverride: Double?
+    /// Alternatives are assets, not simultaneously running animations.
+    public var variants: [String: [CursorVariant]]
+    public var selectedVariants: [String: String]
     public init(id: String, name: String, clips: [String: CursorClip], splitClickAnimation: Bool? = nil,
-                scale: Double = 1, usesNative: Bool = false, sourceThemeName: String? = nil, idleDelayOverride: Double? = nil) {
+                scale: Double = 1, usesNative: Bool = false, sourceThemeName: String? = nil, idleDelayOverride: Double? = nil,
+                variants: [String: [CursorVariant]] = [:], selectedVariants: [String: String] = [:]) {
         self.id = id; self.name = name; self.clips = clips
         self.scale = scale; self.usesNative = usesNative; self.sourceThemeName = sourceThemeName
         self.idleDelayOverride = idleDelayOverride
+        self.variants = variants; self.selectedVariants = selectedVariants
     }
-    private enum CodingKeys: String, CodingKey { case id, name, clips, splitClickAnimation, scale, usesNative, sourceThemeName, idleDelayOverride }
+    private enum CodingKeys: String, CodingKey { case id, name, clips, splitClickAnimation, scale, usesNative, sourceThemeName, idleDelayOverride, variants, selectedVariants }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -91,6 +103,8 @@ public struct CursorRole: Codable, Equatable, Identifiable {
         usesNative = try c.decodeIfPresent(Bool.self, forKey: .usesNative) ?? false
         sourceThemeName = try c.decodeIfPresent(String.self, forKey: .sourceThemeName)
         idleDelayOverride = try c.decodeIfPresent(Double.self, forKey: .idleDelayOverride)
+        variants = try c.decodeIfPresent([String: [CursorVariant]].self, forKey: .variants) ?? [:]
+        selectedVariants = try c.decodeIfPresent([String: String].self, forKey: .selectedVariants) ?? [:]
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -100,9 +114,26 @@ public struct CursorRole: Codable, Equatable, Identifiable {
         try c.encode(scale, forKey: .scale); try c.encode(usesNative, forKey: .usesNative)
         try c.encodeIfPresent(sourceThemeName, forKey: .sourceThemeName)
         try c.encodeIfPresent(idleDelayOverride, forKey: .idleDelayOverride)
+        if !variants.isEmpty { try c.encode(variants, forKey: .variants) }
+        if !selectedVariants.isEmpty { try c.encode(selectedVariants, forKey: .selectedVariants) }
     }
     public func clip(_ motion: Motion) -> CursorClip? { clips[motion.rawValue] }
     public func idleDelay(default global: Double) -> Double { idleDelayOverride ?? global }
+    public mutating func selectVariant(_ id: String, for motion: Motion) {
+        let key = motion.rawValue
+        guard selectedVariants[key] != id else { return }
+        guard let variant = variants[key]?.first(where: { $0.id == id }) else { return }
+        // Keep edits to the outgoing choice, including clips from old themes.
+        if let current = clips[key] {
+            if let oldID = selectedVariants[key], let index = variants[key]?.firstIndex(where: { $0.id == oldID }) {
+                variants[key]?[index].clip = current
+            } else if current != variant.clip {
+                let saved = CursorVariant(id: UUID().uuidString, name: "原有素材", clip: current)
+                variants[key, default: []].append(saved)
+            }
+        }
+        clips[key] = variant.clip; selectedVariants[key] = id
+    }
 }
 
 public struct GalleryTheme: Codable, Equatable {
@@ -132,6 +163,14 @@ public struct GalleryTheme: Codable, Equatable {
                 throw ThemeError.invalid("每个光标必须有常态动画及有效的系统标识。")
             }
             for clip in role.clips.values { try clip.validate() }
+            guard role.variants.count <= Motion.allCases.count, role.variants.allSatisfy({ Motion(rawValue: $0.key) != nil && $0.value.count <= 32 }),
+                  role.selectedVariants.allSatisfy({ motion, id in role.variants[motion]?.contains(where: { $0.id == id }) == true }) else {
+                throw ThemeError.invalid("素材选项或所选版本无效。")
+            }
+            for variants in role.variants.values {
+                guard Set(variants.map(\.id)).count == variants.count else { throw ThemeError.invalid("素材版本标识重复。") }
+                for variant in variants { try variant.clip.validate() }
+            }
         }
     }
 }

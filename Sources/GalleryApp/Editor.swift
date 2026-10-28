@@ -107,6 +107,7 @@ struct GalleryEditor: View {
                             ForEach(Motion.allCases) { Text($0.title).tag($0) }
                         }.pickerStyle(.segmented)
                         if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
+                        if let index = store.roleIndex { variantControls(store.theme.roles[index]) }
                         if let clip = store.clip {
                             clipEditor(clip)
                         } else {
@@ -125,7 +126,7 @@ struct GalleryEditor: View {
                     Circle().fill(store.saveStatus == "已保存在本机" ? .green : .orange).frame(width: 5, height: 5)
                     Text(store.saveStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("Gallery 0.5.2 · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
+                    Text("Gallery \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · 基于 Mousecape").font(.caption).foregroundStyle(.tertiary)
                 }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
             }
         }
@@ -188,6 +189,22 @@ struct GalleryEditor: View {
             }
             if !store.theme.idleEnabled { Text("全局待机动画已关闭，可在「交互与应用设置」中开启。").font(.caption).foregroundStyle(.secondary) }
         }.padding(16).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+    }
+    private func variantControls(_ role: CursorRole) -> some View {
+        HStack(spacing: 12) {
+            let variants = role.variants[store.selectedMotion.rawValue] ?? []
+            if variants.count > 1 {
+                Picker("素材版本", selection: Binding(get: { role.selectedVariants[store.selectedMotion.rawValue] ?? "" }, set: {
+                    store.selectVariant($0, for: store.selectedMotion); selectedFrame = 0; previewStart = Date()
+                })) {
+                    if role.selectedVariants[store.selectedMotion.rawValue] == nil { Text("当前素材").tag("") }
+                    ForEach(variants) { variant in Text(variant.name).tag(variant.id) }
+                }.frame(maxWidth: 440)
+                if let clip = store.clip { Text(clip.frames.count > 1 ? "\(clip.frames.count) 帧" : "单帧").font(.caption).foregroundStyle(.secondary) }
+            } else { Text("素材版本").font(.callout).foregroundStyle(.secondary) }
+            Spacer(minLength: 0)
+            Button("添加其他版本…") { store.importVariant() }
+        }.disabled(runtime.enabled)
     }
     private var statusBar: some View {
         HStack(spacing: 9) {
@@ -334,6 +351,8 @@ private struct ImportThemePanel: View {
                     Label("原版 PRTS Windows 安装包", systemImage: "shippingbox").font(.headline)
                     Text("直接选择下载的完整 ZIP；也可以选择解压后「程序文件」中的 PRTS-Setup.exe。无需安装或运行 Windows 程序。")
                         .font(.callout).foregroundStyle(.secondary)
+                    Text("静态、动态等可选版本会一并保留。旧版主题需重新导入原包，或在角色页「添加其他版本」。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("注意：PRTS-Install.exe 只是安装入口，不含动画。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
@@ -385,7 +404,7 @@ private struct HotspotPreview: View {
     }
 }
 
-private struct InteractionSettings: View {
+struct InteractionSettings: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
     @ObservedObject var preferences: AppPreferences
@@ -417,14 +436,18 @@ private struct InteractionSettings: View {
             }
             Toggle("快速甩动鼠标时放大主题光标", isOn: $preferences.shakeToLocate)
                 .help("连续快速往返甩动时临时放大，随后恢复。此开关控制 Gallery 的放大效果，系统自带的定位鼠标设置独立生效。")
-            Form {
-                Section("交互动画") {
+            ScrollView {
+              VStack(alignment: .leading, spacing: 16) {
+                GroupBox("交互动画") {
+                  VStack(alignment: .leading, spacing: 14) {
                     Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)
                     NumericSlider(title: "默认等待", value: $store.theme.idleDelay, range: 1...60, unit: "秒", inputRange: 1...600)
                     Text("各角色可在「待机」页单独设置，未设置时使用此默认值。").font(.caption).foregroundStyle(.secondary)
                     Toggle("播放左键按下、按住与松手动画", isOn: $store.theme.clickEnabled)
+                  }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Section("在这些应用中暂停交互动画") {
+                GroupBox("在这些应用中暂停交互动画") {
+                  VStack(alignment: .leading, spacing: 10) {
                     ForEach(store.theme.excludedBundleIDs, id: \.self) { id in
                         HStack { Text(id).font(.caption); Spacer(); Button("移除") { store.theme.excludedBundleIDs.removeAll { $0 == id } } }
                     }
@@ -436,8 +459,10 @@ private struct InteractionSettings: View {
                         }
                     }
                     Text("暂停交互时仍保留常态主题。游戏或使用自定义光标的应用可以加入此列表。").font(.caption).foregroundStyle(.secondary)
+                  }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }.formStyle(.grouped).disabled(runtime.enabled)
+              }.padding(.vertical, 2)
+            }.disabled(runtime.enabled)
             HStack {
                 Button("检查输入监控授权") { runtime.requestInputAccess() }
                 Button("打开隐私设置") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!) }

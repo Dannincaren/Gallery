@@ -13,6 +13,13 @@ final class SystemSceneMonitor {
     private var dockPIDs = Set<pid_t>()
     private var managerPIDs = Set<pid_t>()
     private(set) var missionControl = false
+    func isDockWindow(_ id: CGWindowID) -> Bool {
+        guard id != 0, let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]],
+              let pid = rows.first?[kCGWindowOwnerPID as String] as? NSNumber else { return false }
+        // Queried only on button-down; do not scan windows on mouse movement.
+        let pids = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").map(\.processIdentifier)
+        return pids.contains(pid.int32Value)
+    }
     #if GALLERY_RUNTIME_CHECKS
     var testOverride: Bool?
     #endif

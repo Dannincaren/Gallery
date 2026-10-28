@@ -15,20 +15,21 @@ struct NumericSlider: View {
     private var display: Double { value * multiplier }
     var body: some View {
         HStack(spacing: 14) {
-            Text(title).font(.callout.weight(.medium)).frame(minWidth: 76, alignment: .leading)
+            Text(title).font(.callout.weight(.medium)).fixedSize(horizontal: true, vertical: false).frame(minWidth: 76, alignment: .leading)
             Slider(value: Binding(get: { min(range.upperBound, max(range.lowerBound, display)) }, set: {
                 let normalized = $0.rounded() / multiplier
                 if value != normalized { value = normalized }
-            }), in: range).tint(.blue).frame(minWidth: 140, maxWidth: 320).accessibilityLabel(title)
+            }), in: range).labelsHidden().tint(.accentColor).frame(minWidth: 100, maxWidth: .infinity).accessibilityLabel(title)
             HStack(spacing: 4) {
-                TextField(title, text: $draft).textFieldStyle(.plain).multilineTextAlignment(.trailing)
+                TextField("", text: $draft).labelsHidden().textFieldStyle(.plain).multilineTextAlignment(.trailing)
                     .font(.callout.monospacedDigit().weight(.medium)).focused($editing)
                     .frame(width: 48).onSubmit(commit).accessibilityLabel(title + "数值")
                     .help("输入 \(Int(limits.lowerBound))–\(Int(limits.upperBound))\(unit)，回车确认")
-                Text(unit).font(.caption).foregroundStyle(.secondary)
+                Text(unit).font(.caption).foregroundStyle(.secondary).fixedSize()
             }.padding(.horizontal, 10).padding(.vertical, 7)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(editing ? 0.2 : 0.08), lineWidth: 1))
+                .fixedSize(horizontal: true, vertical: false)
         }
         .onAppear { refresh() }
         .onChange(of: value) { _, _ in if !editing { refresh() } }

@@ -60,6 +60,8 @@ public enum ThemeLibrary {
         var updated = theme
         for index in updated.roles.indices where CursorCatalog.family(updated.roles[index].id) == CursorCatalog.family(target.id) {
             updated.roles[index].clips = template.clips
+            updated.roles[index].variants = template.variants
+            updated.roles[index].selectedVariants = template.selectedVariants
             updated.roles[index].usesNative = false
             updated.roles[index].sourceThemeName = sourceName
         }

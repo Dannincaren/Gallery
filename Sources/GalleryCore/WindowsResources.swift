@@ -106,12 +106,16 @@ public struct WindowsResources {
     public func theme() throws -> GalleryTheme {
         var roles: [CursorRole] = []
         var cache: [String: CursorClip] = [:]
-        func load(_ name: String) throws -> CursorClip? {
+        func loadEntry(_ name: String) throws -> CursorClip? {
             if let clip = cache[name] { return clip }
-            guard let data = resource(suffix: name) else { return nil }
-            let clip = resized(try AnimationImport.read(data, extension: URL(fileURLWithPath: name).pathExtension,
-                trimTerminalHold: name.contains("_press") || name.contains("_release") || name == "beam_click.ani"))
+            guard let range = entries[name] else { return nil }
+            let clip = resized(try AnimationImport.read(data.subdata(in: range), extension: URL(fileURLWithPath: name).pathExtension,
+                trimTerminalHold: name.contains("_press") || name.contains("_release") || name.hasSuffix("-beam_click.ani")))
             cache[name] = clip; return clip
+        }
+        func load(_ name: String) throws -> CursorClip? {
+            guard let entry = entries.keys.sorted().first(where: { $0.hasSuffix("-" + name) }) else { return nil }
+            return try loadEntry(entry)
         }
         for descriptor in CursorCatalog.all {
             guard let base = try load(descriptor.resource) else { continue }
@@ -122,7 +126,33 @@ public struct WindowsResources {
                 clips[motion.rawValue] = try load(filename)
             }
             if CursorCatalog.isArrow(descriptor.id) { clips[Motion.idle.rawValue] = try load("idle.ani") }
-            roles.append(CursorRole(id: descriptor.id, name: descriptor.title, clips: clips))
+            var variants: [String: [CursorVariant]] = [:], selected: [String: String] = [:]
+            for motion in Motion.allCases where clips[motion.rawValue] != nil {
+                let original: String
+                switch motion {
+                case .normal: original = descriptor.resource
+                case .idle: original = "idle.ani"
+                case .press: original = prefix == "beam" ? "beam_click.ani" : prefix + "_press.ani"
+                case .hold: original = prefix + "_hold.cur"
+                case .release: original = prefix + "_release.ani"
+                }
+                var filenames = [original]
+                if motion == .normal {
+                    if original == "beam_loop.ani" { filenames.append("beam.cur") }
+                    else if original.hasSuffix(".ani") { filenames.append(prefix + "_static.cur") }
+                    if original == "unavail1.ani" { filenames += ["unavail2.ani", "unavail2_static.cur"] }
+                }
+                let names = filenames.flatMap { file in entries.keys.sorted().filter { $0.hasSuffix("-" + file) } }
+                for name in names.prefix(32) {
+                    guard let clip = try loadEntry(name) else { continue }
+                    let filename = name.components(separatedBy: "-").last ?? name
+                    let kind = clip.frames.count > 1 ? "动态" : "静态"
+                    let label = "\(kind) · \(filename)" + (names.filter { $0.hasSuffix("-" + filename) }.count > 1 ? " · \(name)" : "")
+                    variants[motion.rawValue, default: []].append(CursorVariant(id: name, name: label, clip: clip))
+                }
+                selected[motion.rawValue] = variants[motion.rawValue]?.first?.id
+            }
+            roles.append(CursorRole(id: descriptor.id, name: descriptor.title, clips: clips, variants: variants, selectedVariants: selected))
         }
         let theme = GalleryTheme(name: "PRTS · Gallery", author: "PRTS 原作者 / 用户本地导入", roles: roles)
         try theme.validate(); return theme

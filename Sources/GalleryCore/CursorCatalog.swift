@@ -43,6 +43,7 @@ public enum CursorCatalog {
     }
     public static func assetOnly(_ id: String) -> Bool { id.hasPrefix("com.apple.gallery.") }
     public static func isArrow(_ id: String) -> Bool { ["com.apple.coregraphics.Arrow", "com.apple.cursor.0", "com.apple.coregraphics.ArrowS"].contains(id) }
+    public static func isText(_ id: String) -> Bool { ["com.apple.coregraphics.IBeam", "com.apple.cursor.26"].contains(family(id)) }
     public static func isResize(_ id: String) -> Bool {
         ["com.apple.cursor.17", "com.apple.cursor.21", "com.apple.cursor.29", "com.apple.cursor.33", "com.apple.cursor.39"].contains(family(id))
     }
