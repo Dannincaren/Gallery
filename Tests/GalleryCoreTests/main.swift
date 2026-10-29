@@ -24,7 +24,7 @@ let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
     ("per-theme overall size, legacy archives and cape geometry", regression.testThemeScaleArchivesLegacyAndCape),
     ("ANI whole-file size compatibility with strict chunk bounds", imports.testANIWholeFileSizeCompatibilityAndTruncation),
-    ("gallery cover caches only arrow first frame and upgrades legacy index", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
+    ("gallery default/custom cover snapshots, portable archive and legacy cache", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
     ("Windows INF mapping, actions and unclassified assets", imports.testWindowsINFMappingAndUnclassifiedAssets),
     ("cursor folder import, common filenames and INF precedence", imports.testCursorDirectoryNamingAndINFPrecedence),
     ("material variants preserve edits and portable alternatives", imports.testVariantsPreserveEditsAndArchiveWithoutSourceFiles),

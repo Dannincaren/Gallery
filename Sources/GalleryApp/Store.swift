@@ -26,6 +26,7 @@ final class GalleryStore: ObservableObject {
     private var revision = 0
     private var thumbnailJobs = Set<String>()
     private var libraryRevision = 0
+    private var orderRevision = 0
     private var deletingTheme = false
     private let trashThemeFile: (URL) throws -> URL
     private var subscriptions = Set<AnyCancellable>()
@@ -138,6 +139,14 @@ final class GalleryStore: ObservableObject {
             let inserted = try clip.duplicateFrame(at: index)
             edit { $0 = clip }; return inserted
         } catch { message = error.localizedDescription; return nil }
+    }
+    func setThemeCover(at index: Int) {
+        guard !preview, !importing, let clip, clip.frames.indices.contains(index), theme.coverFrame != clip.frames[index] else { return }
+        theme.coverFrame = clip.frames[index]; changed(); saveNow()
+    }
+    func resetThemeCover() {
+        guard !preview, !importing, theme.coverFrame != nil else { return }
+        theme.coverFrame = nil; changed(); saveNow()
     }
     func selectVariant(_ id: String, for motion: Motion) {
         guard !runtime.enabled, let index = roleIndex else { return }
@@ -261,6 +270,38 @@ final class GalleryStore: ObservableObject {
                     self.mergeThumbnails(row)
                     let rows = self.library, url = self.indexURL
                     self.saveQueue.async { try? ThemeLibrary.saveIndex(rows, at: url) }
+                }
+            }
+        }
+    }
+    /// The array order is the persisted gallery order. Do not reload/apply a
+    /// theme or rewrite its animation archive just to move a card.
+    func moveTheme(_ id: String, to destination: Int) {
+        guard !preview, !importing, library.indices.contains(destination),
+              let source = library.firstIndex(where: { $0.id == id }), source != destination else { return }
+        var ids = library.map(\.id)
+        let moved = ids.remove(at: source)
+        ids.insert(moved, at: destination)
+        reorderThemes(ids)
+    }
+    func reorderThemes(_ ids: [String]) {
+        let previousIDs = library.map(\.id)
+        guard !preview, !importing, ids != previousIDs, ids.count == library.count,
+              Set(ids).count == ids.count, Set(ids) == Set(previousIDs) else { return }
+        let entries = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
+        let rows = ids.compactMap { entries[$0] }
+        library = rows; orderRevision += 1
+        let snapshot = rows, version = orderRevision, index = indexURL
+        saveQueue.async { [weak self] in
+            let result = Result { try ThemeLibrary.saveIndex(snapshot, at: index) }
+            DispatchQueue.main.async {
+                guard let self, self.orderRevision == version else { return }
+                if case .failure(let error) = result {
+                    if self.library.map(\.id) == snapshot.map(\.id) {
+                        let positions = Dictionary(uniqueKeysWithValues: previousIDs.enumerated().map { ($0.element, $0.offset) })
+                        self.library.sort { (positions[$0.id] ?? Int.max) < (positions[$1.id] ?? Int.max) }
+                    }
+                    self.message = "主题顺序保存失败：\(error.localizedDescription)"
                 }
             }
         }

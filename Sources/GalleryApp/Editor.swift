@@ -356,7 +356,8 @@ struct GalleryEditor: View {
                             }.padding(8).background(selectedFrame == index ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(selectedFrame == index ? Color.accentColor : .clear))
                         }.buttonStyle(.plain).contextMenu {
-                            Button("复制这一帧") { duplicateFrame(index) }
+                            Button("复制当前帧") { selectedFrame = index; duplicateFrame(index) }.disabled(runtime.enabled)
+                            Button("设为主题封面") { selectedFrame = index; playing = false; store.setThemeCover(at: index) }
                         }
                     }
                 }.padding(.vertical, 2)
@@ -366,13 +367,24 @@ struct GalleryEditor: View {
                 Button { moveFrame(1) } label: { Label("后移", systemImage: "arrow.right") }.disabled(selectedFrame >= clip.frames.count - 1)
                 Button { duplicateFrame(selectedFrame) } label: { Label("复制当前帧", systemImage: "doc.on.doc") }
                     .disabled(clip.frames.count >= 240)
-                Button("删除选中帧", role: .destructive) {
+                Button("删除当前帧", role: .destructive) {
                     store.edit { $0.frames.remove(at: min(selectedFrame, $0.frames.count - 1)) }
                     selectedFrame = max(0, min(selectedFrame, clip.frames.count - 2))
                 }.disabled(clip.frames.count <= 1)
                 Spacer()
                 Text("支持 PNG 序列、GIF、Windows CUR / ANI").font(.caption).foregroundStyle(.secondary)
             }.disabled(runtime.enabled)
+            HStack {
+                let current = max(0, min(selectedFrame, clip.frames.count - 1))
+                Button {
+                    playing = false; store.setThemeCover(at: current)
+                } label: {
+                    Label(store.theme.coverFrame == clip.frames[current] ? "已设为主题封面" : "设为主题封面", systemImage: "photo")
+                }.disabled(store.importing || store.theme.coverFrame == clip.frames[current])
+                if store.theme.coverFrame != nil { Button("恢复默认封面") { store.resetThemeCover() }.disabled(store.importing) }
+                Spacer()
+                Text("当前帧 \(current + 1) / \(clip.frames.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
         }.padding(18).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 14))
     }
     private func duplicateFrame(_ index: Int) {

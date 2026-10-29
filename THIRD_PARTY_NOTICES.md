@@ -21,3 +21,8 @@ PRTS importer does not grant permission to redistribute the imported artwork.
 
 The built-in demonstration is drawn by Gallery at runtime; it contains no PRTS
 or game artwork. Gallery has no third-party package dependencies.
+
+Gallery’s title uses the unmodified UnifrakturMaguntia font, copyright (c)
+2010 j. 'mach' wust and (c) 2009 Peter Wiegel. The font remains under the
+SIL Open Font License 1.1; see Resources/Fonts/UnifrakturMaguntia-OFL.txt.
+Source: https://github.com/google/fonts/tree/main/ofl/unifrakturmaguntia

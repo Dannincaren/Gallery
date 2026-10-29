@@ -143,6 +143,8 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public var roles: [CursorRole]
     /// Multiplies each role's size, independently for this theme.
     public var pointerScale: Double = 1
+    /// A static cover snapshot, independent of animation editing and playback.
+    public var coverFrame: Data?
     public var idleDelay: Double = 8
     public var idleEnabled = true
     public var clickEnabled = true
@@ -151,7 +153,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         self.name = name; self.author = author; self.roles = roles
     }
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, name, author, roles, pointerScale, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
+        case formatVersion, name, author, roles, pointerScale, coverFrame, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -160,6 +162,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         author = try c.decode(String.self, forKey: .author)
         roles = try c.decode([CursorRole].self, forKey: .roles)
         pointerScale = try c.decodeIfPresent(Double.self, forKey: .pointerScale) ?? 1
+        coverFrame = try c.decodeIfPresent(Data.self, forKey: .coverFrame)
         idleDelay = try c.decode(Double.self, forKey: .idleDelay)
         idleEnabled = try c.decode(Bool.self, forKey: .idleEnabled)
         clickEnabled = try c.decode(Bool.self, forKey: .clickEnabled)
@@ -171,6 +174,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
               idleDelay.isFinite, (1...600).contains(idleDelay), pointerScale.isFinite, (0.5...3).contains(pointerScale) else {
             throw ThemeError.invalid("主题格式、角色或待机时间无效。")
         }
+        if let coverFrame, coverFrame.isEmpty || coverFrame.count > 8_000_000 { throw ThemeError.invalid("主题封面图像无效或过大。") }
         for role in roles {
             if let delay = role.idleDelayOverride, !delay.isFinite || !(1...600).contains(delay) {
                 throw ThemeError.invalid("角色待机等待时间应为 1–600 秒。")

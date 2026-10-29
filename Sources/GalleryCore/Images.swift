@@ -124,6 +124,7 @@ public enum ThemeFiles {
         try theme.validate()
         // Validate image data at the import boundary, before a native call.
         var checked = Set<Data>()
+        if let cover = theme.coverFrame { _ = try CursorImages.bitmap(cover); checked.insert(cover) }
         for role in theme.roles {
             let clips = Array(role.clips.values) + role.variants.values.flatMap { $0.map(\.clip) }
             for clip in clips { for frame in clip.frames where checked.insert(frame).inserted { _ = try CursorImages.bitmap(frame) } }

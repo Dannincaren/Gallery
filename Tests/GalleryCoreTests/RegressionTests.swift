@@ -189,6 +189,28 @@ final class RegressionTests {
         let legacy = try JSONDecoder().decode(LibraryTheme.self, from: JSONSerialization.data(withJSONObject: json))
         expectEqual(legacy.cover, nil)
         expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: legacy).cover, cover)
+        var custom = theme; custom.coverFrame = blue
+        let customRow = ThemeLibrary.thumbnails(id: id, theme: custom, previous: row)
+        let customBitmap = NSBitmapImageRep(cgImage: try CursorImages.bitmap(try require(customRow.cover)))
+        expectGreater(customBitmap.colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!.blueComponent, 0.9)
+        expectEqual(custom.roles, theme.roles)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gallery")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try ThemeFiles.save(custom, to: url)
+        expectEqual(try ThemeFiles.load(url), custom)
+        var archive = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        expectEqual((archive["images"] as! [String: String]).count, 2) // cover reuses a frame in the image pool
+        // A cover is a snapshot: deleting/replacing that source frame retains it.
+        for i in custom.roles.indices { custom.roles[i].clips["normal"]!.frames = [red] }
+        try ThemeFiles.save(custom, to: url); expectEqual(try ThemeFiles.load(url).coverFrame, blue)
+        archive = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        archive["coverFrame"] = "missing-image"
+        try JSONSerialization.data(withJSONObject: archive).write(to: url)
+        expectThrows(try ThemeFiles.load(url))
+        custom.coverFrame = Data([1, 2, 3]); try ThemeFiles.save(custom, to: url)
+        expectThrows(try ThemeFiles.load(url))
+        custom.coverFrame = nil
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: custom, previous: customRow).cover, cover)
     }
     func testPersistedThumbnailCacheAndLegacyIndex() throws {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)])

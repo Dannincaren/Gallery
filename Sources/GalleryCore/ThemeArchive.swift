@@ -9,6 +9,7 @@ struct ThemeArchive: Codable {
     var name: String
     var author: String
     var pointerScale: Double?
+    var coverFrame: String?
     var idleDelay: Double
     var idleEnabled: Bool
     var clickEnabled: Bool
@@ -54,6 +55,10 @@ struct ThemeArchive: Codable {
                         scale: role.scale, usesNative: role.usesNative, sourceThemeName: role.sourceThemeName, idleDelayOverride: role.idleDelayOverride,
                         clips: clips, variants: variants.isEmpty ? nil : variants, selectedVariants: role.selectedVariants.isEmpty ? nil : role.selectedVariants)
         }
+        if let cover = theme.coverFrame {
+            let key = SHA256.hash(data: cover).map { String(format: "%02x", $0) }.joined()
+            pool[key] = cover; coverFrame = key
+        } else { coverFrame = nil }
         images = pool
     }
     func theme() throws -> GalleryTheme {
@@ -75,6 +80,10 @@ struct ThemeArchive: Codable {
         }
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
         theme.pointerScale = pointerScale ?? 1
+        if let coverFrame {
+            guard let cover = images[coverFrame] else { throw ThemeError.invalid("主题缺少封面图像。") }
+            theme.coverFrame = cover
+        }
         theme.idleDelay = idleDelay; theme.idleEnabled = idleEnabled; theme.clickEnabled = clickEnabled
         theme.excludedBundleIDs = excludedBundleIDs
         try theme.validate(); return theme

@@ -33,7 +33,7 @@ public enum ThemeLibrary {
     /// A persisted 64px image avoids retaining full animation frames per row.
     public static func thumbnails(id: String, theme: GalleryTheme, previous: LibraryTheme?) -> LibraryTheme {
         var row = LibraryTheme(id: id, theme: theme)
-        if let arrow = theme.roles.first(where: { CursorCatalog.isArrow($0.id) }), let frame = arrow.clip(.normal)?.frames.first {
+        if let frame = theme.coverFrame ?? theme.roles.first(where: { CursorCatalog.isArrow($0.id) })?.clip(.normal)?.frames.first {
             let key = SHA256.hash(data: frame).map { String(format: "%02x", $0) }.joined()
             row.coverKey = key
             if previous?.coverKey == key, let cover = previous?.cover { row.cover = cover }

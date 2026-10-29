@@ -15,6 +15,8 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 cp "$binary_dir/Gallery" "$app_dir/Contents/MacOS/Gallery"
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
 cp LICENSE THIRD_PARTY_NOTICES.md "$app_dir/Contents/Resources/"
+mkdir -p "$app_dir/Contents/Resources/Fonts"
+cp Resources/Fonts/* "$app_dir/Contents/Resources/Fonts/"
 swift Scripts/make-icon.swift .build/Gallery.iconset
 iconutil -c icns .build/Gallery.iconset -o "$app_dir/Contents/Resources/Gallery.icns"
 plutil -lint "$app_dir/Contents/Info.plist"

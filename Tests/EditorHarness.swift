@@ -49,6 +49,68 @@ struct EditorHarness {
         }
         print("PASS independent theme size, reset, legacy migration and external import")
     }
+    static func checkThemeOrder(at root: URL, role: CursorRole) throws {
+        let folder = root.appendingPathComponent("Themes"), index = root.appendingPathComponent("themes.json")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let themes = ["A", "B", "C"].map { GalleryTheme(name: $0, roles: [role]) }
+        let rows = themes.map { LibraryTheme(theme: $0) }, ids = rows.map(\.id)
+        for (theme, row) in zip(themes, rows) { try ThemeFiles.save(theme, to: folder.appendingPathComponent(row.id + ".gallery")) }
+        try ThemeLibrary.saveIndex(rows, at: index)
+        let store = GalleryStore(rootURL: root); store.saveNow(wait: true)
+        let selected = store.selectedThemeID, original = store.theme
+        let originalFiles = try ids.map { try Data(contentsOf: folder.appendingPathComponent($0 + ".gallery")) }
+        func persisted(_ order: [String]) throws {
+            let until = Date().addingTimeInterval(5)
+            while (try? ThemeLibrary.loadIndex(at: index).map(\.id)) != order && Date() < until {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            try verify(try ThemeLibrary.loadIndex(at: index).map(\.id) == order, "主题顺序未落盘或被旧保存覆盖")
+        }
+        store.moveTheme(ids[0], to: 2); try persisted([ids[1], ids[2], ids[0]])
+        store.moveTheme(ids[0], to: 0); store.moveTheme(ids[2], to: 1)
+        let expected = [ids[0], ids[2], ids[1]]
+        try persisted(expected)
+        store.reorderThemes([ids[1], ids[0], ids[2]]); try persisted([ids[1], ids[0], ids[2]])
+        store.reorderThemes(expected); try persisted(expected)
+        store.reorderThemes([ids[0], ids[0], ids[1]])
+        store.reorderThemes(Array(expected.dropLast()))
+        store.reorderThemes(expected + [UUID().uuidString])
+        store.moveTheme("missing", to: 0); store.moveTheme(ids[1], to: -1); store.moveTheme(ids[1], to: 3)
+        try verify(store.library.map(\.id) == expected && store.selectedThemeID == selected && store.theme == original && !store.runtime.enabled,
+            "排序改变了浏览主题、动画、运行状态或接受了无效目标")
+        let savedFiles = try ids.map { try Data(contentsOf: folder.appendingPathComponent($0 + ".gallery")) }
+        try verify(savedFiles == originalFiles, "排序重写了主题素材归档")
+        store.setThemeCover(at: 1); store.saveNow(wait: true)
+        try verify(store.theme.coverFrame == role.clip(.normal)!.frames[1] && store.theme.roles == original.roles,
+            "当前帧封面修改了动画或选错图像")
+        let coverSaved = try ThemeFiles.load(folder.appendingPathComponent(selected + ".gallery"))
+        try verify(coverSaved.coverFrame == store.theme.coverFrame && store.library.first(where: { $0.id == selected })?.cover != nil,
+            "自定义封面未随主题或目录持久化")
+        store.setThemeCover(at: -1); try verify(store.theme.coverFrame == coverSaved.coverFrame, "无效帧清除了封面")
+        store.resetThemeCover(); store.saveNow(wait: true)
+        try verify(try ThemeFiles.load(folder.appendingPathComponent(selected + ".gallery")).coverFrame == nil, "恢复默认封面未保存")
+        // A delayed editor save and thumbnail callbacks must retain new order.
+        store.theme.name = "Edited A"; store.changed()
+        store.moveTheme(ids[0], to: 2)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        let latest = [ids[2], ids[1], ids[0]]; try persisted(latest)
+        try verify(try ThemeFiles.load(folder.appendingPathComponent(selected + ".gallery")).name == "Edited A", "排序丢失待保存的主题编辑")
+        let reopened = GalleryStore(rootURL: root); reopened.saveNow(wait: true)
+        try verify(reopened.library.map(\.id) == latest, "重新打开后主题顺序丢失")
+        let imported = root.appendingPathComponent("D.gallery")
+        try ThemeFiles.save(GalleryTheme(name: "D", roles: [role]), to: imported)
+        reopened.importURL(imported); try waitFor(reopened); reopened.saveNow(wait: true)
+        try verify(Array(reopened.library.map(\.id).prefix(3)) == latest && reopened.library.last?.name == "D", "导入打乱了自定义顺序")
+        let prior = reopened.library.map(\.id), backup = try Data(contentsOf: index)
+        try FileManager.default.removeItem(at: index); try FileManager.default.createDirectory(at: index, withIntermediateDirectories: true)
+        reopened.message = nil
+        reopened.moveTheme(prior[0], to: prior.count - 1)
+        let until = Date().addingTimeInterval(5)
+        while reopened.message == nil && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        try verify(reopened.message?.hasPrefix("主题顺序保存失败") == true && reopened.library.map(\.id) == prior, "排序写入失败未提示或丢失目录顺序")
+        try FileManager.default.removeItem(at: index); try backup.write(to: index)
+        print("PASS theme reorder, restart, archive isolation, queued saves, import append and write-failure rollback")
+    }
     static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -62,6 +124,7 @@ struct EditorHarness {
             let first = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])
             let legacy = GalleryTheme(name: "Legacy", roles: [first])
             try checkThemeSizes(at: root.appendingPathComponent("SizeIsolation"), role: first)
+            try checkThemeOrder(at: root.appendingPathComponent("ThemeOrdering"), role: first)
             try ThemeFiles.save(legacy, to: root.appendingPathComponent("current.gallery"))
             let store = GalleryStore(rootURL: root); store.saveNow(wait: true)
             try verify(store.library.count == 1 && store.theme == legacy, "旧主题迁移失败")
