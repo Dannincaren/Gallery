@@ -2,6 +2,78 @@ import AppKit
 import GalleryCore
 
 final class ImportTests {
+    func testANIWholeFileSizeCompatibilityAndTruncation() throws {
+        func number(_ value: Int) -> Data { Data((0..<4).map { UInt8((value >> ($0 * 8)) & 255) }) }
+        func chunk(_ name: String, _ payload: Data) -> Data {
+            Data(name.utf8) + number(payload.count) + payload + Data(repeating: 0, count: payload.count % 2)
+        }
+        func cursor(_ color: NSColor) throws -> Data {
+            let png = try frame(color)
+            return Data([0, 0, 2, 0, 1, 0, 12, 12, 0, 0, 3, 0, 4, 0]) + number(png.count) + number(22) + png
+        }
+        let header = [36, 2, 2, 12, 12, 32, 1, 3, 1].reduce(into: Data()) { $0.append(number($1)) }
+        let images = chunk("icon", try cursor(.red)) + chunk("icon", try cursor(.blue))
+        let body = Data("ACON".utf8) + chunk("anih", header) + chunk("LIST", Data("fram".utf8) + images)
+        let standard = Data("RIFF".utf8) + number(body.count) + body
+        let expected = try AnimationImport.read(standard, extension: "ani")
+        expectEqual(expected.hotX, 3); expectEqual(expected.hotY, 4)
+        expectEqual(expected.duration, 0.1, accuracy: 0.000001)
+        var exported = standard
+        exported.replaceSubrange(4..<8, with: number(standard.count))
+        expectEqual(try AnimationImport.read(exported, extension: "ani"), expected)
+        for declared in [0, standard.count - 16, standard.count + 8, Int(UInt32.max)] {
+            var invalid = standard; invalid.replaceSubrange(4..<8, with: number(declared))
+            expectThrows(try AnimationImport.read(invalid, extension: "ani"))
+        }
+        for removed in [1, 8, 20] {
+            var truncated = Data(exported.dropLast(removed))
+            truncated.replaceSubrange(4..<8, with: number(truncated.count))
+            expectThrows(try AnimationImport.read(truncated, extension: "ani"))
+        }
+        for extra in [Data([1]), Data(repeating: 0, count: 7)] {
+            let dangling = standard + extra
+            var invalid = dangling; invalid.replaceSubrange(4..<8, with: number(dangling.count - 8))
+            expectThrows(try AnimationImport.read(invalid, extension: "ani"))
+            let nested = body + chunk("LIST", Data("fram".utf8) + extra)
+            let incompleteFrameChunk = Data("RIFF".utf8) + number(nested.count) + nested
+            expectThrows(try AnimationImport.read(incompleteFrameChunk, extension: "ani"))
+        }
+        do {
+            _ = try WindowsThemeImport.theme(files: ["pointer.ani": Data([0])], name: "Broken")
+            preconditionFailure("Expected invalid ANI")
+        } catch { expectEqual(error.localizedDescription.contains("pointer.ani"), true) }
+    }
+    func testRealAngelinaDirectoryOptionalIntegration() throws {
+        guard let path = ProcessInfo.processInfo.environment["GALLERY_ANGELINA_DIRECTORY"] else { return }
+        let directory = URL(fileURLWithPath: path)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension.lowercased() == "ani" }
+        expectEqual(files.count, 13)
+        let theme = try WindowsThemeImport.load(directory)
+        expectEqual(theme.name, "Angelina")
+        expectFalse(theme.roles.contains { CursorCatalog.assetOnly($0.id) })
+        let imported = Set(theme.roles.flatMap { $0.variants.values.flatMap { $0.map(\.id) } })
+        expectEqual(imported, Set(files.map(\.lastPathComponent)))
+        let arrow = try require(theme.roles.first { CursorCatalog.isArrow($0.id) }?.clip(.normal))
+        let bitmap = try require(NSBitmapImageRep(data: arrow.frames[0]))
+        let transparent = (0..<64).reduce(0) { total, y in
+            total + (0..<64).filter { bitmap.colorAt(x: $0, y: y)!.alphaComponent < 0.01 }.count
+        }
+        expectEqual(transparent, 1064) // first source frame's AND-mask bits
+        for file in files {
+            let original = try Data(contentsOf: file)
+            var standard = original
+            standard.replaceSubrange(4..<8, with: (0..<4).map { UInt8(((original.count - 8) >> ($0 * 8)) & 255) })
+            let clip = try AnimationImport.read(original, extension: "ani")
+            expectEqual(clip, try AnimationImport.read(standard, extension: "ani"))
+            expectGreater(clip.frames.count, 1); expectEqual(clip.width, 64); expectEqual(clip.height, 64)
+            for role in theme.roles {
+                if let variant = role.variants["normal"]?.first(where: { $0.id == file.lastPathComponent }) { expectEqual(variant.clip, clip) }
+            }
+        }
+        let archive = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gallery")
+        defer { try? FileManager.default.removeItem(at: archive) }
+        try ThemeFiles.save(theme, to: archive); expectEqual(try ThemeFiles.load(archive), theme)
+    }
     func testWindowsINFMappingAndUnclassifiedAssets() throws {
         let png = try frame(.red)
         var cur = Data([0, 0, 2, 0, 1, 0, 12, 12, 0, 0, 3, 0, 4, 0])
@@ -172,6 +244,28 @@ final class ImportTests {
         expectGreater(top.redComponent, 0.9)
         expectGreater(bottom.blueComponent, 0.9)
         expectGreater(top.alphaComponent, 0.9)
+    }
+    func test24BitCURMaskAndRowPadding() throws {
+        var payload = Data()
+        func number(_ n: Int, _ size: Int = 4) { payload.append(contentsOf: (0..<size).map { UInt8((n >> ($0 * 8)) & 255) }) }
+        number(40); number(2); number(4); number(1, 2); number(24, 2)
+        number(0); number(16); number(0); number(0); number(0); number(0)
+        // BGR rows are DWORD aligned: two blue pixels below two red pixels.
+        payload.append(contentsOf: [255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 255, 0, 0, 255, 0, 0])
+        payload.append(contentsOf: [0, 0, 0, 0, 0x80, 0, 0, 0]) // top-left transparent
+        func cursor(_ payload: Data) -> Data {
+            var cur = Data([0, 0, 2, 0, 1, 0, 2, 2, 0, 0, 1, 0, 1, 0])
+            for n in [payload.count, 22] { cur.append(contentsOf: (0..<4).map { UInt8((n >> ($0 * 8)) & 255) }) }
+            return cur + payload
+        }
+        let clip = try AnimationImport.read(cursor(payload), extension: "cur")
+        let image = try require(NSBitmapImageRep(data: clip.frames[0]))
+        expectEqual(image.colorAt(x: 0, y: 0)!.alphaComponent, 0)
+        expectGreater(image.colorAt(x: 1, y: 0)!.usingColorSpace(.deviceRGB)!.redComponent, 0.9)
+        expectGreater(image.colorAt(x: 1, y: 1)!.usingColorSpace(.deviceRGB)!.blueComponent, 0.9)
+        expectGreater(image.colorAt(x: 1, y: 1)!.alphaComponent, 0.9)
+        expectEqual(clip.hotX, 1); expectEqual(clip.hotY, 1)
+        expectThrows(try AnimationImport.read(cursor(Data(payload.dropLast(1))), extension: "cur"))
     }
     func testRealPRTSOptionalIntegration() throws {
         guard let path = ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"] else {

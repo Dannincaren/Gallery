@@ -18,7 +18,7 @@ struct ThemeGallery<Actions: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 HStack(alignment: .center) {
-                    Text("Gallery").font(.system(size: 34, weight: .semibold))
+                    Text("Gallery").font(.custom("Zapfino", size: 28))
                     Spacer()
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)

@@ -177,7 +177,9 @@ public enum WindowsThemeImport {
         }
         func clip(_ asset: String) throws -> CursorClip {
             if let cached = decoded[asset] { return cached }
-            let clip = try AnimationImport.read(files[asset]!, extension: URL(fileURLWithPath: asset).pathExtension.lowercased())
+            let clip: CursorClip
+            do { clip = try AnimationImport.read(files[asset]!, extension: URL(fileURLWithPath: asset).pathExtension.lowercased()) }
+            catch { throw ThemeError.invalid("无法读取素材「\(asset)」：\(error.localizedDescription)") }
             decoded[asset] = clip; return clip
         }
         var roles: [CursorRole] = []

@@ -25,17 +25,21 @@ public enum AnimationImport {
         let payload = data.subdata(in: start..<start + length)
         let imageData: Data
         if payload.starts(with: [137, 80, 78, 71]) { imageData = payload }
-        else if payload.count >= 40, try u32(payload, 0) == 40, try u16(payload, 14) == 32, try u32(payload, 16) == 0,
+        else if payload.count >= 40, try u32(payload, 0) == 40, [24, 32].contains(try u16(payload, 14)), try u32(payload, 16) == 0,
                 try u32(payload, 4) == width, try u32(payload, 8) == height * 2 {
-            // Decode common 32-bit bottom-up CUR DIBs ourselves. This avoids
-            // ImageIO's legacy ICO colorspace warnings and honors the AND mask
-            // when the source has an all-zero alpha channel.
-            let pixelStart = 40, stride = width * 4, maskStride = ((width + 31) / 32) * 4
+            // Decode common 24/32-bit bottom-up CUR DIBs ourselves. ImageIO can
+            // discard a 24-bit icon's AND mask, producing an opaque black box.
+            // 32-bit images use the mask when their alpha channel is all zero.
+            let pixelStart = 40, pixelBytes = try u16(payload, 14) / 8
+            let stride = ((width * pixelBytes + 3) / 4) * 4, maskStride = ((width + 31) / 32) * 4
             guard pixelStart + stride * height <= payload.count else { throw ThemeError.invalid("CUR 位图已截断。") }
-            let hasAlpha = (0..<height).contains { row in (0..<width).contains { column in payload[pixelStart + row * stride + column * 4 + 3] != 0 } }
+            if pixelBytes == 3, pixelStart + stride * height + maskStride * height > payload.count {
+                throw ThemeError.invalid("CUR 透明遮罩已截断。")
+            }
+            let hasAlpha = pixelBytes == 4 && (0..<height).contains { row in (0..<width).contains { column in payload[pixelStart + row * stride + column * 4 + 3] != 0 } }
             var rgba = [UInt8](repeating: 0, count: width * height * 4)
             for y in 0..<height { for x in 0..<width {
-                let source = pixelStart + (height - 1 - y) * stride + x * 4
+                let source = pixelStart + (height - 1 - y) * stride + x * pixelBytes
                 let dest = (y * width + x) * 4
                 let mask = pixelStart + stride * height + (height - 1 - y) * maskStride + x / 8
                 let alpha: UInt8 = hasAlpha ? payload[source + 3] : (mask < payload.count && payload[mask] & (0x80 >> (x % 8)) != 0 ? 0 : 255)
@@ -90,15 +94,21 @@ public enum AnimationImport {
     }
     private static func ani(_ data: Data, trimTerminalHold: Bool) throws -> CursorClip {
         guard data.count >= 12, String(data: data.prefix(4), encoding: .ascii) == "RIFF",
-              String(data: data[8..<12], encoding: .ascii) == "ACON",
-              try u32(data, 4) + 8 == data.count else { throw ThemeError.invalid("无效 ANI 文件。") }
+              String(data: data[8..<12], encoding: .ascii) == "ACON" else { throw ThemeError.invalid("无效 ANI 文件头。") }
+        let declaredSize = try u32(data, 4)
+        // Some Windows exporters include the RIFF header in its own size field
+        // (e.g. Angelina). Accept only this exact eight-byte discrepancy. Parse
+        // against the real buffer and still require complete, bounded chunks.
+        guard declaredSize == data.count - 8 || declaredSize == data.count else {
+            throw ThemeError.invalid("ANI 声明长度与实际文件不符，文件可能已截断。")
+        }
         var frames: [CursorClip] = [], rates: [Int] = [], sequence: [Int] = []
         var defaultRate = 3, steps = 0
         var position = 12
         while position + 8 <= data.count {
             let tag = String(data: data[position..<position + 4], encoding: .ascii)
             let length = try u32(data, position + 4), start = position + 8, end = start + length
-            guard end <= data.count else { throw ThemeError.invalid("ANI 区块越界。") }
+            guard end + length % 2 <= data.count else { throw ThemeError.invalid("ANI 区块越界。") }
             if tag == "anih", length >= 36 { steps = try u32(data, start + 8); defaultRate = max(1, try u32(data, start + 28)) }
             if tag == "rate" || tag == "seq " {
                 guard length % 4 == 0, length <= 40000 else { throw ThemeError.invalid("ANI 时序无效。") }
@@ -109,15 +119,17 @@ public enum AnimationImport {
                 var p = start + 4
                 while p + 8 <= end {
                     let n = try u32(data, p + 4)
-                    guard p + 8 + n <= end, frames.count < 10000 else { throw ThemeError.invalid("ANI 帧越界。") }
+                    guard p + 8 + n + n % 2 <= end, frames.count < 10000 else { throw ThemeError.invalid("ANI 帧越界。") }
                     if String(data: data[p..<p + 4], encoding: .ascii) == "icon" {
                         frames.append(try cursor(data.subdata(in: p + 8..<p + 8 + n)))
                     }
                     p += 8 + n + n % 2
                 }
+                guard p == end else { throw ThemeError.invalid("ANI 帧区块已截断。") }
             }
             position = end + length % 2
         }
+        guard position == data.count else { throw ThemeError.invalid("ANI 区块已截断。") }
         guard let template = frames.first else { throw ThemeError.invalid("ANI 缺少图像。") }
         if steps == 0 { steps = frames.count }
         guard steps <= 10000 else { throw ThemeError.invalid("ANI 时序过长。") }

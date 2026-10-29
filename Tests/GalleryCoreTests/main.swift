@@ -22,6 +22,7 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("ANI whole-file size compatibility with strict chunk bounds", imports.testANIWholeFileSizeCompatibilityAndTruncation),
     ("gallery cover caches only arrow first frame and upgrades legacy index", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
     ("Windows INF mapping, actions and unclassified assets", imports.testWindowsINFMappingAndUnclassifiedAssets),
     ("cursor folder import, common filenames and INF precedence", imports.testCursorDirectoryNamingAndINFPrecedence),
@@ -58,6 +59,7 @@ var checks: [(String, () throws -> Void)] = [
     ("duplicate roles and malformed PE rejection", imports.testDuplicateRolesAndMalformedPEAreRejected),
     ("CUR decoding and hotspot", imports.testCURHotspotAndPixels),
     ("CUR DIB alpha and bottom-up orientation", imports.testCURDIBAlphaAndBottomUpOrder),
+    ("24-bit CUR mask, row padding and transparency", imports.test24BitCURMaskAndRowPadding),
     ("unsplit click completes after quick mouse-up", regression.testUnsplitClickCompletesWithoutHoldOrRelease),
     ("unsplit click automatically plays the release segment", regression.testUnsplitClickAutomaticallyPlaysRelease),
     ("hold assets determine interaction and override legacy switches", regression.testRoleDefaultsAndLegacyMigration),
@@ -70,6 +72,9 @@ if ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"] != nil {
 } else { print("SKIP real PRTS integration (set GALLERY_PRTS_EXE to a locally downloaded installer)") }
 if ProcessInfo.processInfo.environment["GALLERY_WINDOWS_EXE"] != nil {
     checks.append(("real mon3tr EXE and ZIP preserve all embedded cursor assets", imports.testRealWindowsEXEOptionalIntegration))
+}
+if ProcessInfo.processInfo.environment["GALLERY_ANGELINA_DIRECTORY"] != nil {
+    checks.append(("real Angelina folder imports all ANI assets without changing frames", imports.testRealAngelinaDirectoryOptionalIntegration))
 }
 for (name, check) in checks {
     do { try check(); print("PASS \(name)") }
