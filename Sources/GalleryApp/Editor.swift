@@ -13,23 +13,32 @@ struct GalleryEditor: View {
     @State private var showImport = false
     @State private var showRoleSource = false
     @State private var themeToDelete: LibraryTheme?
-    @State private var expandedThemes = Set<String>()
+    @State private var showingTheme = false
+    @State private var openingThemeID: String?
+    @State private var deletingThemeID: String?
+    @State private var themeToRename: LibraryTheme?
     @State private var editorActive = NSApp.isActive
     @State private var editorVisible = true
-    init(store: GalleryStore) { self.store = store; self.runtime = store.runtime; self.preferences = store.preferences }
+    init(store: GalleryStore, startInTheme: Bool = false) {
+        self.store = store; self.runtime = store.runtime; self.preferences = store.preferences
+        _showingTheme = State(initialValue: startInTheme)
+    }
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            editorDetail
+        Group {
+            if showingTheme {
+                NavigationSplitView { sidebar } detail: { editorDetail }
+            } else {
+                ThemeGallery(store: store, runtime: runtime, open: openTheme, importTheme: { showImport = true }) { folder in
+                    themeActions(folder)
+                }
+            }
         }
         .toolbar { themeToolbar }
-        .confirmationDialog("删除整个主题？", isPresented: deletionPresented, titleVisibility: .visible) {
-            if let folder = themeToDelete {
-                Button("移入废纸篓", role: .destructive) { store.deleteTheme(folder.id); themeToDelete = nil }
+        .sheet(item: $themeToDelete) { folder in
+            ThemeDeleteSheet(theme: folder, message: deletionMessage(folder)) {
+                deletingThemeID = folder.id; store.deleteTheme(folder.id); themeToDelete = nil
             }
-            Button("取消", role: .cancel) { themeToDelete = nil }
-        } message: { Text(deletionMessage) }
+        }
         .disabled(store.importing)
         .sheet(isPresented: $showSettings) { InteractionSettings(store: store, runtime: runtime) }
         .sheet(isPresented: $showImport) { ImportThemePanel(store: store) }
@@ -42,11 +51,36 @@ struct GalleryEditor: View {
         } message: { Text(runtime.error ?? store.message ?? "") }
         .onChange(of: store.selectedRole) { _, _ in selectedFrame = 0; previewStart = Date() }
         .onChange(of: store.selectedMotion) { _, _ in selectedFrame = 0; previewStart = Date() }
-        .onAppear { expandedThemes.insert(store.selectedThemeID); editorActive = NSApp.isActive }
+        .onAppear { editorActive = NSApp.isActive }
         .background(EditorVisibilityReader(visible: $editorVisible).frame(width: 0, height: 0))
-        .onChange(of: store.selectedThemeID) { _, id in expandedThemes = [id] }
+        .onChange(of: store.selectedThemeID) { _, id in
+            if openingThemeID == id { showingTheme = true; openingThemeID = nil }
+            selectedFrame = 0; previewStart = Date()
+        }
+        .onChange(of: store.importing) { _, busy in
+            guard !busy else { return }
+            if let id = openingThemeID {
+                showingTheme = store.selectedThemeID == id; openingThemeID = nil
+            }
+            if let id = deletingThemeID {
+                if !store.library.contains(where: { $0.id == id }) { showGallery() }
+                deletingThemeID = nil
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in editorActive = true }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in editorActive = false }
+        .sheet(item: $themeToRename) { folder in
+            ThemeRenameSheet(theme: folder) { store.renameTheme(folder.id, to: $0) }
+        }
+        .overlay {
+            if store.importing {
+                ZStack {
+                    Color.black.opacity(0.05).ignoresSafeArea()
+                    HStack(spacing: 12) { ProgressView().controlSize(.small); Text(openingThemeID == nil ? "正在处理主题…" : "正在打开主题…") }
+                        .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
         .sheet(isPresented: $showRoleSource) { RoleSourcePicker(store: store) }
         .frame(minWidth: 960, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -62,7 +96,6 @@ struct GalleryEditor: View {
                             Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("导入主题…") { showImport = true }
                         if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
 
                     }
@@ -110,35 +143,48 @@ struct GalleryEditor: View {
             }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
         }
     }
-    private var themeToolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            Button { showImport = true } label: { Label("导入主题", systemImage: "square.and.arrow.down") }
-            Menu {
-                Button("从 Windows 光标安装包导入…") { store.importPRTS() }
-                Button("导出 Gallery 主题…") { store.exportTheme() }
-                Button("导出常态 Mousecape 主题…") { store.exportTheme(cape: true) }
-                Divider()
-                Button("载入内置示例") { store.resetDemo() }
-                Divider()
-                Button("删除当前浏览的整个主题…", role: .destructive) {
-                    themeToDelete = store.library.first(where: { $0.id == store.selectedThemeID })
-                }
-            } label: { Label("主题", systemImage: "ellipsis.circle") }
-            if !store.isActiveTheme(store.selectedThemeID) {
-                Button { store.applyCurrentTheme() } label: {
-                    Label(runtime.enabled ? "切换到此主题" : "使用此主题", systemImage: "play.circle.fill")
-                }.tint(.blue).help("使用正在浏览的「\(store.theme.name)」")
-            }
-            if runtime.enabled {
-                Button { runtime.stop() } label: { Label("停用并恢复", systemImage: "pause.circle.fill") }.tint(.orange)
+    @ToolbarContentBuilder private var themeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            if showingTheme {
+                Button(action: showGallery) { Label("主题橱窗", systemImage: "chevron.left") }.help("返回主题橱窗")
             }
         }
+        ToolbarItemGroup {
+            if showingTheme && !store.isActiveTheme(store.selectedThemeID) {
+                Button { store.applyCurrentTheme() } label: { Label("使用此主题", systemImage: "play.circle") }.tint(.blue)
+            }
+            if runtime.enabled {
+                Button { runtime.stop() } label: { Label("停用并恢复", systemImage: "pause.circle") }
+            }
+            Button { showImport = true } label: { Label("导入主题", systemImage: "plus") }
+            Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
+        }
     }
-    private var deletionPresented: Binding<Bool> {
-        Binding(get: { themeToDelete != nil }, set: { if !$0 { themeToDelete = nil } })
+    private func openTheme(_ id: String) {
+        guard !store.importing else { return }
+        playing = true; previewStart = Date(); openingThemeID = id
+        store.selectTheme(id)
+        if store.selectedThemeID == id { showingTheme = true; openingThemeID = nil }
     }
-    private var deletionMessage: String {
-        guard let folder = themeToDelete else { return "" }
+    private func showGallery() {
+        playing = false; showingTheme = false; openingThemeID = nil
+        store.saveNow()
+    }
+    @ViewBuilder private func themeActions(_ folder: LibraryTheme) -> some View {
+        Button("打开主题") { openTheme(folder.id) }
+        if store.isActiveTheme(folder.id) {
+            Button("停用并恢复光标") { runtime.stop() }
+        } else {
+            Button("使用此主题") { store.selectTheme(folder.id, activate: true) }
+        }
+        Divider()
+        Button("重命名…") { themeToRename = folder }
+        Button("导出 Gallery 主题…") { store.exportTheme(folder.id) }
+        Button("导出常态 Mousecape 主题…") { store.exportTheme(folder.id, cape: true) }
+        Divider()
+        Button("删除整个主题…", role: .destructive) { themeToDelete = folder }
+    }
+    private func deletionMessage(_ folder: LibraryTheme) -> String {
         var text = "将删除「\(folder.name)」的全部角色与动画。"
         if store.isActiveTheme(folder.id) { text += "该主题正在使用，会先停用并恢复光标。" }
         text += "原始安装包不受影响；主题文件可从废纸篓找回。"
@@ -147,95 +193,47 @@ struct GalleryEditor: View {
     }
     private var sidebarText: Color { colorScheme == .dark ? .white : .black }
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "cursorarrow.rays").font(.system(size: 26)).foregroundStyle(.primary)
-                VStack(alignment: .leading) {
-                    Text("Gallery").font(.title2.bold())
-                    Text("让指针有自己的节奏").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Gallery").font(.title2.weight(.semibold)).padding(.top, 20).padding(.horizontal, 18)
+            HStack(alignment: .top, spacing: 12) {
+                if let data = store.library.first(where: { $0.id == store.selectedThemeID })?.cover, let image = EditorImageCache.image(data) {
+                    Image(nsImage: image).resizable().interpolation(.none).scaledToFit().frame(width: 36, height: 36)
                 }
-            }.padding(.horizontal, 14).padding(.top, 18)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("正在浏览的主题").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button(role: .destructive) { themeToDelete = store.library.first { $0.id == store.selectedThemeID } } label: {
-                        Image(systemName: "trash")
-                    }.buttonStyle(.plain).help("删除当前浏览的整个主题")
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(store.theme.name).font(.headline).lineLimit(3).foregroundStyle(sidebarText)
+                    Text(store.isActiveTheme(store.selectedThemeID) ? "正在使用" : "正在浏览")
+                        .font(.caption).foregroundStyle(store.isActiveTheme(store.selectedThemeID) ? .green : .secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if let folder = store.library.first(where: { $0.id == store.selectedThemeID }) {
+                    Menu { themeActions(folder) } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("主题操作")
                 }
-                TextField("主题名称", text: $store.theme.name).font(.headline).textFieldStyle(.roundedBorder)
-                    .disabled(runtime.enabled)
-                    .onChange(of: store.theme.name) { _, _ in store.changed() }
-            }.padding(.horizontal, 14)
+            }.padding(14).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 12)
             List {
                 Section {
-                    ForEach(store.library) { folder in
-                        themeRow(folder)
-                    }
-                } header: { Text("主题目录").foregroundStyle(sidebarText.opacity(0.65)) }
-            }.listStyle(.sidebar).foregroundStyle(.primary)
-            Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
-                .buttonStyle(.plain).padding(16)
-        }
-        .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
+                    ForEach(store.visibleRoles) { role in roleRow(role) }
+                } header: { Text("光标角色").foregroundStyle(sidebarText.opacity(0.65)) }
+            }.listStyle(.sidebar)
+        }.navigationSplitViewColumnWidth(min: 220, ideal: 246, max: 300)
     }
-    private func themeRow(_ folder: LibraryTheme) -> some View {
-        DisclosureGroup(isExpanded: Binding(get: { expandedThemes.contains(folder.id) }, set: { open in
-            if open { expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id) } else { expandedThemes.remove(folder.id) }
-        })) {
-            ForEach(folder.roles) { role in
-                Button {
-                    store.selectTheme(folder.id, role: role.id)
-                } label: {
-                    HStack(spacing: 9) {
-                        if let thumbnail = role.thumbnail, let image = EditorImageCache.image(thumbnail) {
-                            Image(nsImage: image).resizable().scaledToFit().frame(width: 25, height: 25)
-                        } else {
-                            Image(systemName: role.usesNative ? "cursorarrow" : "cursorarrow.rays").foregroundStyle(.primary).frame(width: 25, height: 25)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(role.name).font(.callout).foregroundStyle(sidebarText)
-                            Text(roleSubtitle(role))
-                                .font(.caption2).foregroundStyle(sidebarText.opacity(0.65))
-                        }
-                        Spacer(minLength: 0)
-                    }.padding(.vertical, 4).padding(.horizontal, 5)
-                        .contentShape(Rectangle())
-                        .background(store.selectedThemeID == folder.id && store.selectedRole == role.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                }.buttonStyle(.plain)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Button {
-                    expandedThemes.insert(folder.id); store.ensureThumbnails(folder.id)
-                    store.selectTheme(folder.id)
-                } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label(folder.name, systemImage: "folder").font(.headline).foregroundStyle(sidebarText).lineLimit(2)
-                        HStack(spacing: 5) {
-                            if store.isActiveTheme(folder.id) {
-                                Text("正在使用").foregroundStyle(.green)
-                            }
-                            if store.selectedThemeID == folder.id {
-                                Text("浏览中").foregroundStyle(Color.accentColor)
-                            }
-                        }.font(.caption2.weight(.medium))
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).help("浏览主题与角色；点击「使用」才会切换实际光标。")
-                if !store.isActiveTheme(folder.id) {
-                    Button("使用") { store.selectTheme(folder.id, activate: true) }
-                        .controlSize(.mini).buttonStyle(.bordered)
-                        .help("切换实际光标为「\(folder.name)」")
+    private func roleRow(_ role: CursorRole) -> some View {
+        let summary = store.library.first(where: { $0.id == store.selectedThemeID })?.roles.first(where: { $0.id == role.id })
+        let selected = CursorCatalog.family(store.selectedRole) == CursorCatalog.family(role.id)
+        return Button { store.selectedRole = role.id } label: {
+            HStack(spacing: 11) {
+                Group {
+                    if let data = summary?.thumbnail, let image = EditorImageCache.image(data) {
+                        Image(nsImage: image).resizable().interpolation(.none).scaledToFit()
+                    } else { Image(systemName: "cursorarrow").foregroundStyle(sidebarText.opacity(0.6)) }
+                }.frame(width: 28, height: 28).padding(5).background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 7))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(role.name).font(.callout.weight(selected ? .semibold : .regular)).foregroundStyle(sidebarText)
+                    Text(roleSubtitle(LibraryRole(role))).font(.caption2).foregroundStyle(sidebarText.opacity(0.6))
                 }
-            }
-        }
-        .contextMenu {
-            Button("使用此主题") { store.selectTheme(folder.id, activate: true) }
-                .disabled(store.isActiveTheme(folder.id))
-            Button("浏览主题") { store.selectTheme(folder.id) }
-            Divider()
-            Button("删除整个主题…", role: .destructive) { themeToDelete = folder }
-        }
+                Spacer(minLength: 0)
+            }.padding(.vertical, 5).padding(.horizontal, 6).contentShape(RoundedRectangle(cornerRadius: 8))
+                .background(selected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain)
     }
     private func roleSubtitle(_ role: LibraryRole) -> String {
         if role.usesNative { return "系统原有" }
@@ -441,9 +439,10 @@ private struct ImportThemePanel: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
             }
             HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("载入内置主题") { dismiss(); store.resetDemo() }
                 Spacer()
-                Button("选择文件并导入…") {
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("选择文件或文件夹…") {
                     dismiss(); DispatchQueue.main.async { store.openTheme() }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }

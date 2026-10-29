@@ -136,6 +136,28 @@ final class RegressionTests {
         for i in 0..<6 { shake.observe(x: i % 2 == 0 ? 70 : -70, y: 0, at: 2 + Double(i)) }
         expectEqual(shake.scale(at: 7), 1)
     }
+    func testGalleryCoverUsesArrowFirstFrameAndLegacyCache() throws {
+        let red = try ImportTests().frame(.red), blue = try ImportTests().frame(.blue)
+        let link = CursorRole(id: "com.apple.cursor.13", name: "Link", clips: ["normal": CursorClip(frames: [blue])])
+        let arrow = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": CursorClip(frames: [red, blue])])
+        let theme = GalleryTheme(name: "Showcase", roles: [link, arrow]), id = UUID().uuidString
+        let row = ThemeLibrary.thumbnails(id: id, theme: theme, previous: nil)
+        let cover = try require(row.cover), bitmap = try CursorImages.bitmap(cover)
+        expectFalse(bitmap.width > 192 || bitmap.height > 192)
+        let color = NSBitmapImageRep(cgImage: bitmap).colorAt(x: 0, y: 0)!.usingColorSpace(.deviceRGB)!
+        expectGreater(color.redComponent, 0.9)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: row), row)
+        var changed = theme; changed.roles[1].clips["normal"]!.frames = [blue, red]
+        let updated = ThemeLibrary.thumbnails(id: id, theme: changed, previous: row)
+        expectFalse(updated.coverKey == row.coverKey)
+        expectFalse(updated.cover == cover)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: GalleryTheme(name: "No arrow", roles: [link]), previous: nil).cover, nil)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as! [String: Any]
+        json.removeValue(forKey: "cover"); json.removeValue(forKey: "coverKey")
+        let legacy = try JSONDecoder().decode(LibraryTheme.self, from: JSONSerialization.data(withJSONObject: json))
+        expectEqual(legacy.cover, nil)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: legacy).cover, cover)
+    }
     func testPersistedThumbnailCacheAndLegacyIndex() throws {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)])
         let role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])

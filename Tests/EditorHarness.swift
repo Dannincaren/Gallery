@@ -85,6 +85,19 @@ struct EditorHarness {
             let variantsSaved = try ThemeFiles.load(selectedURL)
             try verify(variantsSaved.roles[2].clip(.normal)?.hotY == 6 && variantsSaved.roles[2].variants["normal"]?.count == 2, "素材切换未保留编辑或未独立保存")
             print("PASS variant switching preserves aliases, edits, other roles and portable assets")
+            let beforeRename = reopened.theme, beforeRole = reopened.selectedRole
+            reopened.renameTheme(secondID, to: "  Renamed collection  "); try waitFor(reopened)
+            try verify(reopened.selectedThemeID == firstID && reopened.selectedRole == beforeRole && reopened.theme == beforeRename,
+                "卡片重命名改变了当前浏览主题或角色")
+            let renamed = try ThemeFiles.load(root.appendingPathComponent("Themes/" + secondID + ".gallery"))
+            try verify(renamed.name == "Renamed collection" && reopened.library.first(where: { $0.id == secondID })?.name == renamed.name,
+                "卡片重命名没有更新归档与目录")
+            reopened.renameTheme(firstID, to: "Selected collection"); reopened.saveNow(wait: true)
+            let renamedSelected = try ThemeFiles.load(selectedURL)
+            try verify(renamedSelected.name == "Selected collection" && renamedSelected.roles == beforeRename.roles,
+                "当前主题重命名丢失了角色或动画")
+            try verify(reopened.library.first(where: { $0.id == firstID })?.cover != nil, "封面缓存未合并到当前主题")
+            print("PASS card rename preserves browsing, clips, alternatives and cached cover")
             let trashRoot = root.appendingPathComponent("TestTrash")
             try FileManager.default.createDirectory(at: trashRoot, withIntermediateDirectories: true)
             let deleting = GalleryStore(rootURL: root, trashThemeFile: { input in

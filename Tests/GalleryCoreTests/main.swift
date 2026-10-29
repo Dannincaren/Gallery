@@ -22,6 +22,7 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("gallery cover caches only arrow first frame and upgrades legacy index", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
     ("Windows INF mapping, actions and unclassified assets", imports.testWindowsINFMappingAndUnclassifiedAssets),
     ("cursor folder import, common filenames and INF precedence", imports.testCursorDirectoryNamingAndINFPrecedence),
     ("material variants preserve edits and portable alternatives", imports.testVariantsPreserveEditsAndArchiveWithoutSourceFiles),

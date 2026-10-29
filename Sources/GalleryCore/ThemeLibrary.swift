@@ -17,6 +17,8 @@ public struct LibraryTheme: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var roles: [LibraryRole]
+    public var cover: Data?
+    public var coverKey: String?
     public init(id: String = UUID().uuidString, theme: GalleryTheme) {
         self.id = id; name = theme.name
         var names = Set<String>()
@@ -31,6 +33,16 @@ public enum ThemeLibrary {
     /// A persisted 64px image avoids retaining full animation frames per row.
     public static func thumbnails(id: String, theme: GalleryTheme, previous: LibraryTheme?) -> LibraryTheme {
         var row = LibraryTheme(id: id, theme: theme)
+        if let arrow = theme.roles.first(where: { CursorCatalog.isArrow($0.id) }), let frame = arrow.clip(.normal)?.frames.first {
+            let key = SHA256.hash(data: frame).map { String(format: "%02x", $0) }.joined()
+            row.coverKey = key
+            if previous?.coverKey == key, let cover = previous?.cover { row.cover = cover }
+            else if let source = CGImageSourceCreateWithData(frame as CFData, nil),
+                    let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 192, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) {
+                row.cover = try? CursorImages.png(image)
+            }
+        }
         for i in row.roles.indices {
             guard let role = theme.roles.first(where: { $0.id == row.roles[i].id }), let frame = role.clip(.normal)?.frames.first else { continue }
             let key = SHA256.hash(data: frame).map { String(format: "%02x", $0) }.joined()

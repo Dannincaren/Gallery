@@ -184,6 +184,7 @@ final class GalleryStore: ObservableObject {
         if let index = library.firstIndex(where: { $0.id == selectedThemeID }) {
             let old = library[index]
             var updated = LibraryTheme(id: selectedThemeID, theme: theme)
+            updated.cover = old.cover; updated.coverKey = old.coverKey
             for i in updated.roles.indices {
                 if let previous = old.roles.first(where: { $0.id == updated.roles[i].id }) {
                     updated.roles[i].thumbnail = previous.thumbnail; updated.roles[i].thumbnailKey = previous.thumbnailKey
@@ -233,6 +234,7 @@ final class GalleryStore: ObservableObject {
     private func mergeThumbnails(_ row: LibraryTheme) {
         guard let index = library.firstIndex(where: { $0.id == row.id }) else { return }
         var updated = library[index]
+        updated.cover = row.cover; updated.coverKey = row.coverKey
         for i in updated.roles.indices {
             if let source = row.roles.first(where: { $0.id == updated.roles[i].id }) {
                 updated.roles[i].thumbnail = source.thumbnail
@@ -242,7 +244,7 @@ final class GalleryStore: ObservableObject {
         library[index] = updated
     }
     func ensureThumbnails(_ id: String) {
-        guard !preview, let entry = library.first(where: { $0.id == id }), entry.roles.contains(where: { $0.thumbnail == nil }), !thumbnailJobs.contains(id) else { return }
+        guard !preview, let entry = library.first(where: { $0.id == id }), (entry.roles.contains(where: { $0.thumbnail == nil }) || (entry.cover == nil && entry.roles.contains(where: { CursorCatalog.isArrow($0.id) }))), !thumbnailJobs.contains(id) else { return }
         if id == selectedThemeID { saveNow(); return }
         thumbnailJobs.insert(id)
         let url = themeURL(id), capturedLibrary = libraryRevision
@@ -389,7 +391,7 @@ final class GalleryStore: ObservableObject {
                 switch result {
                 case .success(let imported):
                     self.installTheme(imported)
-                    self.message = "已加入主题目录。展开目录选择角色；点击「应用此主题」启用。"
+                    self.message = "已加入主题橱窗。打开卡片可编辑角色；在主题菜单中选择「使用此主题」启用。"
                 case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
                 }
             }
@@ -422,14 +424,55 @@ final class GalleryStore: ObservableObject {
         do { try ThemeLibrary.applyTemplate(role, sourceName: sourceName, to: selectedRole, in: &theme); changed() }
         catch { message = error.localizedDescription }
     }
-    func exportTheme(cape: Bool = false) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = theme.name + (cape ? ".cape" : ".gallery")
-        panel.message = cape ? "导出常态光标供 Mousecape 使用；交互动画请保存为 Gallery 主题。" : "保存包含全部动画和交互设置的主题。"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            if cape { try ThemeFiles.exportCape(theme, to: url) } else { try ThemeFiles.save(theme, to: url) }
-        } catch { message = error.localizedDescription }
+    func exportTheme(cape: Bool = false) { exportTheme(selectedThemeID, cape: cape) }
+    func exportTheme(_ id: String, cape: Bool = false) {
+        guard !importing else { return }
+        loadLibraryTheme(id) { [weak self] result in
+            guard let self else { return }
+            do {
+                let snapshot = try result.get()
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = snapshot.name + (cape ? ".cape" : ".gallery")
+                panel.message = cape ? "导出常态光标供 Mousecape 使用；交互动画请保存为 Gallery 主题。" : "保存包含全部动画和交互设置的主题。"
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                if cape { try ThemeFiles.exportCape(snapshot, to: url) } else { try ThemeFiles.save(snapshot, to: url) }
+            } catch { self.message = error.localizedDescription }
+        }
+    }
+    func renameTheme(_ id: String, to input: String) {
+        guard !importing, library.contains(where: { $0.id == id }) else { return }
+        let name = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { message = "主题名称不能为空。"; return }
+        if id == selectedThemeID { theme.name = name; changed(); return }
+        saveNow(); libraryRevision += 1; revision += 1; importing = true
+        let rows = library, destination = themeURL(id), index = indexURL
+        saveQueue.async { [weak self] in
+            let result = Result { () -> LibraryTheme in
+                let original = try Data(contentsOf: destination), originalIndex = try Data(contentsOf: index)
+                var theme = try ThemeFiles.load(destination); theme.name = name
+                let row = ThemeLibrary.thumbnails(id: id, theme: theme, previous: rows.first { $0.id == id })
+                var updated = rows
+                if let i = updated.firstIndex(where: { $0.id == id }) { updated[i] = row }
+                do {
+                    try ThemeFiles.save(theme, to: destination)
+                    try ThemeLibrary.saveIndex(updated, at: index)
+                } catch {
+                    try? original.write(to: destination, options: .atomic)
+                    try? originalIndex.write(to: index, options: .atomic)
+                    throw error
+                }
+                return row
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }; self.importing = false
+                switch result {
+                case .success(let row):
+                    if let i = self.library.firstIndex(where: { $0.id == id }) { self.library[i] = row }
+                    self.saveStatus = "已保存在本机"
+                case .failure(let error): self.message = error.localizedDescription
+                }
+            }
+        }
     }
     func importFrames(append: Bool) {
         guard !runtime.enabled else { return }
