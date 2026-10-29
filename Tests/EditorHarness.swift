@@ -11,6 +11,44 @@ struct EditorHarness {
         while store.importing && Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         try verify(!store.importing, "目录操作超时")
     }
+    static func checkThemeSizes(at root: URL, role: CursorRole) throws {
+        let themes = root.appendingPathComponent("Themes")
+        try FileManager.default.createDirectory(at: themes, withIntermediateDirectories: true)
+        let a = GalleryTheme(name: "A", roles: [role]), b = GalleryTheme(name: "B", roles: [role])
+        let rows = [LibraryTheme(theme: a), LibraryTheme(theme: b)]
+        func legacyFile(_ theme: GalleryTheme, at url: URL) throws {
+            try ThemeFiles.save(theme, to: url)
+            var json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+            json.removeValue(forKey: "pointerScale")
+            try JSONSerialization.data(withJSONObject: json).write(to: url)
+        }
+        for (theme, row) in zip([a, b], rows) { try legacyFile(theme, at: themes.appendingPathComponent(row.id + ".gallery")) }
+        try ThemeLibrary.saveIndex(rows, at: root.appendingPathComponent("themes.json"))
+        let store = GalleryStore(rootURL: root, legacyPointerScale: 1.86); store.saveNow(wait: true)
+        try verify(store.theme.pointerScale == 1.86, "旧全局大小未初始化当前主题")
+        store.setThemeScale(1.4); store.saveNow(wait: true)
+        store.selectTheme(rows[1].id); try waitFor(store)
+        try verify(store.theme.pointerScale == 1.86, "未打开旧主题的初始大小随其他主题改变")
+        store.setThemeScale(0.8); store.saveNow(wait: true)
+        store.selectTheme(rows[0].id); try waitFor(store)
+        try verify(store.theme.pointerScale == 1.4 && store.theme.roles == a.roles, "切换主题丢失整体大小或改变了角色素材")
+        store.setThemeScale(1); store.saveNow(wait: true)
+        store.selectTheme(rows[1].id); try waitFor(store)
+        store.setThemeScale(.nan)
+        try verify(store.theme.pointerScale == 0.8, "还原或非法值改变了另一主题的大小")
+        let oldImport = root.appendingPathComponent("external.gallery")
+        try legacyFile(a, at: oldImport)
+        store.importURL(oldImport); try waitFor(store); store.saveNow(wait: true)
+        try verify(store.theme.pointerScale == 1, "新导入的无大小主题继承了旧全局大小")
+        store.setThemeScale(2.3); store.saveNow(wait: true)
+        let importedID = store.selectedThemeID
+        let reopened = GalleryStore(rootURL: root, legacyPointerScale: 2.9); reopened.saveNow(wait: true)
+        for (id, value) in [(rows[0].id, 1.0), (rows[1].id, 0.8), (importedID, 2.3)] {
+            reopened.selectTheme(id); try waitFor(reopened)
+            try verify(reopened.theme.pointerScale == value, "重新打开主题后大小未独立保存")
+        }
+        print("PASS independent theme size, reset, legacy migration and external import")
+    }
     static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -23,6 +61,7 @@ struct EditorHarness {
             let clip = CursorClip(frames: [png, png])
             let first = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])
             let legacy = GalleryTheme(name: "Legacy", roles: [first])
+            try checkThemeSizes(at: root.appendingPathComponent("SizeIsolation"), role: first)
             try ThemeFiles.save(legacy, to: root.appendingPathComponent("current.gallery"))
             let store = GalleryStore(rootURL: root); store.saveNow(wait: true)
             try verify(store.library.count == 1 && store.theme == legacy, "旧主题迁移失败")

@@ -19,6 +19,7 @@ final class GalleryStore: ObservableObject {
     private let root: URL
     private let preview: Bool
     private let selectionDefaults: Bool
+    private let loadStoredTheme: @Sendable (URL) throws -> GalleryTheme
     private let saveQueue = DispatchQueue(label: "Gallery.theme-files", qos: .utility)
     private var handledLaunch = false
     private var pendingSave: DispatchWorkItem?
@@ -31,7 +32,11 @@ final class GalleryStore: ObservableObject {
     private var pendingDockRefresh: DispatchWorkItem?
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
-    init(preview: Bool = false, rootURL: URL? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+    init(preview: Bool = false, rootURL: URL? = nil, legacyPointerScale: Double? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+        let savedScale = legacyPointerScale ?? (rootURL == nil && !preview ? UserDefaults.standard.double(forKey: "pointerScale") : 1)
+        let inheritedScale = savedScale.isFinite && (0.5...3).contains(savedScale) ? savedScale : 1
+        let read: @Sendable (URL) throws -> GalleryTheme = { try ThemeFiles.load($0, legacyPointerScale: inheritedScale) }
+        loadStoredTheme = read
         self.trashThemeFile = trashThemeFile ?? { url in
             var trashed: NSURL?
             try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
@@ -46,13 +51,13 @@ final class GalleryStore: ObservableObject {
             if let index = try? ThemeLibrary.loadIndex(at: root.appendingPathComponent("themes.json")) { rows = index }
             if !rows.isEmpty {
                 selected = rows.first(where: { $0.id == UserDefaults.standard.string(forKey: "currentThemeID") })?.id ?? rows[0].id
-                if let saved = try? ThemeFiles.load(root.appendingPathComponent("Themes/" + selected + ".gallery")) { loaded = saved }
+                if let saved = try? read(root.appendingPathComponent("Themes/" + selected + ".gallery")) { loaded = saved }
                 else {
                     // Keep a damaged archive intact; opening the editor must
                     // never silently overwrite that user's only copy.
                     selected = UUID().uuidString; rows.append(LibraryTheme(id: selected, theme: loaded))
                 }
-            } else if let saved = try? ThemeFiles.load(root.appendingPathComponent("current.gallery")) { loaded = saved }
+            } else if let saved = try? read(root.appendingPathComponent("current.gallery")) { loaded = saved }
         }
         theme = loaded; selectedThemeID = selected; selectedRole = loaded.roles[0].id
         if rows.isEmpty { rows = [LibraryTheme(id: selected, theme: loaded)] }
@@ -65,7 +70,6 @@ final class GalleryStore: ObservableObject {
     }
     func handleLaunch() {
         guard !handledLaunch else { return }; handledLaunch = true
-        runtime.setScale(preferences.pointerScale)
         runtime.setShakeEnabled(preferences.shakeToLocate)
         if selectionDefaults {
             runtime.$enabled.combineLatest(preferences.$hideDockIconWhileRunning)
@@ -111,7 +115,7 @@ final class GalleryStore: ObservableObject {
         guard !importing else { return }
         saveNow(wait: true)
         guard saveStatus == "已保存在本机", runtime.stop() else { return }
-        runtime.setScale(preferences.pointerScale); runtime.start(theme)
+        runtime.start(theme)
         activeThemeID = runtime.enabled ? selectedThemeID : nil
         if runtime.enabled && selectionDefaults { UserDefaults.standard.set(selectedThemeID, forKey: "lastAppliedThemeID") }
     }
@@ -247,9 +251,9 @@ final class GalleryStore: ObservableObject {
         guard !preview, let entry = library.first(where: { $0.id == id }), (entry.roles.contains(where: { $0.thumbnail == nil }) || (entry.cover == nil && entry.roles.contains(where: { CursorCatalog.isArrow($0.id) }))), !thumbnailJobs.contains(id) else { return }
         if id == selectedThemeID { saveNow(); return }
         thumbnailJobs.insert(id)
-        let url = themeURL(id), capturedLibrary = libraryRevision
+        let url = themeURL(id), capturedLibrary = libraryRevision, read = loadStoredTheme
         saveQueue.async { [weak self] in
-            let row = (try? ThemeFiles.load(url)).map { ThemeLibrary.thumbnails(id: id, theme: $0, previous: entry) }
+            let row = (try? read(url)).map { ThemeLibrary.thumbnails(id: id, theme: $0, previous: entry) }
             DispatchQueue.main.async {
                 guard let self else { return }; self.thumbnailJobs.remove(id)
                 guard capturedLibrary == self.libraryRevision, self.library.contains(where: { $0.id == id }) else { return }
@@ -269,9 +273,9 @@ final class GalleryStore: ObservableObject {
         }
         guard !importing, library.contains(where: { $0.id == id }) else { return }
         saveNow(); importing = true
-        let url = themeURL(id)
+        let url = themeURL(id), read = loadStoredTheme
         saveQueue.async { [weak self] in
-            let result = Result { try ThemeFiles.load(url) }
+            let result = Result { try read(url) }
             DispatchQueue.main.async {
                 guard let self else { return }; self.importing = false
                 // The save and load use the same serial queue; its save-result
@@ -290,9 +294,9 @@ final class GalleryStore: ObservableObject {
     }
     func loadLibraryTheme(_ id: String, completion: @escaping (Result<GalleryTheme, Error>) -> Void) {
         if id == selectedThemeID { completion(.success(theme)); return }
-        let url = themeURL(id)
+        let url = themeURL(id), read = loadStoredTheme
         saveQueue.async {
-            let result = Result { try ThemeFiles.load(url) }
+            let result = Result { try read(url) }
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -307,7 +311,7 @@ final class GalleryStore: ObservableObject {
         // directory index after the deletion commits.
         libraryRevision += 1; revision += 1; importing = true; deletingTheme = true
         let previousRows = library, previousTheme = theme, previousID = selectedThemeID
-        let root = self.root, source = themeURL(id), trash = trashThemeFile
+        let root = self.root, source = themeURL(id), trash = trashThemeFile, read = loadStoredTheme
         saveQueue.async { [weak self] in
             let result = Result { () -> (GalleryTheme, String, [LibraryTheme]) in
                 var rows = previousRows.filter { $0.id != id }
@@ -315,7 +319,7 @@ final class GalleryStore: ObservableObject {
                 if previousID != id { selected = previousID; next = previousTheme }
                 else if let first = rows.first {
                     selected = first.id
-                    next = try ThemeFiles.load(root.appendingPathComponent("Themes/" + first.id + ".gallery"))
+                    next = try read(root.appendingPathComponent("Themes/" + first.id + ".gallery"))
                 } else {
                     next = Demo.makeTheme()
                     let row = ThemeLibrary.thumbnails(id: UUID().uuidString, theme: next, previous: nil)
@@ -397,6 +401,15 @@ final class GalleryStore: ObservableObject {
             }
         }
     }
+    func setThemeScale(_ value: Double) {
+        guard value.isFinite else { return }
+        let value = min(3, max(0.5, value))
+        guard theme.pointerScale != value else { return }
+        theme.pointerScale = value
+        // Browsing another collection must not resize the applied theme.
+        if runtime.enabled && activeThemeID == selectedThemeID { runtime.setScale(value) }
+        changed()
+    }
     func setRoleScale(_ value: Double, for identifier: String? = nil) {
         guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
         let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.5, value))
@@ -445,11 +458,11 @@ final class GalleryStore: ObservableObject {
         guard !name.isEmpty else { message = "主题名称不能为空。"; return }
         if id == selectedThemeID { theme.name = name; changed(); return }
         saveNow(); libraryRevision += 1; revision += 1; importing = true
-        let rows = library, destination = themeURL(id), index = indexURL
+        let rows = library, destination = themeURL(id), index = indexURL, read = loadStoredTheme
         saveQueue.async { [weak self] in
             let result = Result { () -> LibraryTheme in
                 let original = try Data(contentsOf: destination), originalIndex = try Data(contentsOf: index)
-                var theme = try ThemeFiles.load(destination); theme.name = name
+                var theme = try read(destination); theme.name = name
                 let row = ThemeLibrary.thumbnails(id: id, theme: theme, previous: rows.first { $0.id == id })
                 var updated = rows
                 if let i = updated.firstIndex(where: { $0.id == id }) { updated[i] = row }

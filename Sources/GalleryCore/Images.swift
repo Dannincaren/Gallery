@@ -96,11 +96,11 @@ public enum CursorImages {
 }
 
 public enum ThemeFiles {
-    public static func load(_ url: URL) throws -> GalleryTheme {
+    public static func load(_ url: URL, legacyPointerScale: Double = 1) throws -> GalleryTheme {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= 80_000_000 else { throw ThemeError.invalid("主题文件超过 80 MB。") }
         let data = try Data(contentsOf: url)
-        let theme: GalleryTheme
+        var theme: GalleryTheme
         if url.pathExtension.lowercased() == "cape" {
             guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                   let cursors = p["Cursors"] as? [String: [String: Any]] else {
@@ -112,10 +112,14 @@ public enum ThemeFiles {
             theme = GalleryTheme(name: p["CapeName"] as? String ?? url.deletingPathExtension().lastPathComponent,
                                  author: p["Author"] as? String ?? "", roles: roles)
         } else {
-            struct Header: Decodable { var formatVersion: Int }
-            if try JSONDecoder().decode(Header.self, from: data).formatVersion == 2 {
+            struct Header: Decodable { var formatVersion: Int; var pointerScale: Double? }
+            let header = try JSONDecoder().decode(Header.self, from: data)
+            if header.formatVersion == 2 {
                 theme = try JSONDecoder().decode(ThemeArchive.self, from: data).theme()
             } else { theme = try JSONDecoder().decode(GalleryTheme.self, from: data) }
+            // Only existing library files opt into the old application setting.
+            // External imports use 100% unless their archive specifies a size.
+            if header.pointerScale == nil { theme.pointerScale = legacyPointerScale }
         }
         try theme.validate()
         // Validate image data at the import boundary, before a native call.
@@ -135,7 +139,7 @@ public enum ThemeFiles {
         try theme.validate()
         let selected = theme.roles.filter { !$0.usesNative && !CursorCatalog.assetOnly($0.id) }
         guard !selected.isEmpty else { throw ThemeError.invalid("没有需要导出的自定义光标。完整设置请保存为 Gallery 主题。") }
-        let cursors = try Dictionary(uniqueKeysWithValues: selected.map { ($0.id, try CursorImages.capeDictionary($0.clip(.normal)!.scaled(by: $0.scale))) })
+        let cursors = try Dictionary(uniqueKeysWithValues: selected.map { ($0.id, try CursorImages.capeDictionary($0.clip(.normal)!.scaled(by: theme.pointerScale * $0.scale))) })
         let dictionary: [String: Any] = ["CapeName": theme.name, "Author": theme.author,
             "Identifier": "local.gallery.export", "CapeVersion": 1.0, "Version": 2.0,
             "MinimumVersion": 2.0, "HiDPI": true, "Cloud": false, "Cursors": cursors]

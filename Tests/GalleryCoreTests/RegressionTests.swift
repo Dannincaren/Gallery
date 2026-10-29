@@ -3,6 +3,38 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testThemeScaleArchivesLegacyAndCape() throws {
+        let clip = CursorClip(frames: [try ImportTests().frame(.red)], width: 24, height: 24, hotX: 2, hotY: 3)
+        let role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip], scale: 1.5)
+        var theme = GalleryTheme(name: "Sized", roles: [role]); theme.pointerScale = 2
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("theme.gallery")
+        try ThemeFiles.save(theme, to: url)
+        expectEqual(try ThemeFiles.load(url, legacyPointerScale: 0.8), theme)
+        expectEqual(try JSONDecoder().decode(GalleryTheme.self, from: JSONEncoder().encode(theme)), theme)
+        for data in [try Data(contentsOf: url), try JSONEncoder().encode(theme)] {
+            var old = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            old.removeValue(forKey: "pointerScale")
+            try JSONSerialization.data(withJSONObject: old).write(to: url)
+            expectEqual(try ThemeFiles.load(url).pointerScale, 1)
+            expectEqual(try ThemeFiles.load(url, legacyPointerScale: 1.86).pointerScale, 1.86)
+            expectEqual(try ThemeFiles.load(url).roles, theme.roles)
+        }
+        let cape = root.appendingPathComponent("theme.cape")
+        try ThemeFiles.exportCape(theme, to: cape)
+        let restored = try ThemeFiles.load(cape)
+        expectEqual(restored.roles[0].clip(.normal)?.width, 72)
+        expectEqual(restored.roles[0].clip(.normal)?.hotX, 6)
+        expectEqual(restored.roles[0].clip(.normal)?.hotY, 9)
+        expectEqual(restored.pointerScale, 1) // exported geometry already includes both scales
+        expectEqual(theme.roles[0].clip(.normal), clip)
+        for value in [Double.nan, .infinity, 0.49, 3.01] {
+            var invalid = theme; invalid.pointerScale = value
+            expectThrows(try invalid.validate())
+        }
+    }
     func testNormalLoopSurvivesBriefCursorRegionRebuilds() {
         var clocks = RoleAnimationClocks()
         expectEqual(clocks.start(for: "text", suggested: 1, now: 1), 1)

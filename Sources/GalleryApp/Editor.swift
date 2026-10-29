@@ -100,11 +100,11 @@ struct GalleryEditor: View {
 
                     }
                     HStack(spacing: 12) {
-                        NumericSlider(title: "全局大小", value: Binding(get: { preferences.pointerScale }, set: {
-                            preferences.pointerScale = $0; runtime.setScale($0)
+                        NumericSlider(title: "主题整体大小", value: Binding(get: { store.theme.pointerScale }, set: {
+                            store.setThemeScale($0)
                         }), range: 50...300, unit: "%", multiplier: 100)
-                        Button("还原") { preferences.pointerScale = 1; runtime.setScale(1) }
-                        Text("仅缩放主题指针").font(.caption).foregroundStyle(.secondary)
+                        Button("还原") { store.setThemeScale(1) }
+                        Text("仅影响当前主题").font(.caption).foregroundStyle(.secondary)
                     }
                     if store.importing {
                         HStack { ProgressView().controlSize(.small); Text("正在转换和整理动画，请稍候…") }
@@ -384,7 +384,7 @@ struct GalleryEditor: View {
                 NumericSlider(title: "此角色大小", value: Binding(get: { role.scale }, set: { store.setRoleScale($0, for: role.id) }),
                               range: 50...300, unit: "%", multiplier: 100).disabled(role.usesNative).id(role.id + ":size")
                 Button("还原") { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
-                Text("叠加在全局大小之上").font(.caption).foregroundStyle(.secondary)
+                Text("叠加在主题整体大小之上").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Toggle("使用系统原有光标", isOn: Binding(get: { role.usesNative }, set: { store.setUsesNative($0) }))

@@ -140,6 +140,7 @@ final class CursorRuntime: ObservableObject {
         }
         do {
             try theme.validate()
+            pointerScale = theme.pointerScale
             guard GLCursorBridge.available() else { throw ThemeError.invalid("此系统未提供所需光标接口。编辑器仍可使用。") }
             guard !hasRecovery else { throw ThemeError.invalid("存在上次未完成的恢复记录。请先恢复上次光标。") }
             var backup: [String: [String: Any]] = [:], base: [String: [String: Any]] = [:]

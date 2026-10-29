@@ -8,6 +8,7 @@ struct ThemeArchive: Codable {
     var formatVersion = 2
     var name: String
     var author: String
+    var pointerScale: Double?
     var idleDelay: Double
     var idleEnabled: Bool
     var clickEnabled: Bool
@@ -36,7 +37,7 @@ struct ThemeArchive: Codable {
         var hotY: Double
     }
     init(_ theme: GalleryTheme) {
-        name = theme.name; author = theme.author; idleDelay = theme.idleDelay
+        name = theme.name; author = theme.author; idleDelay = theme.idleDelay; pointerScale = theme.pointerScale
         idleEnabled = theme.idleEnabled; clickEnabled = theme.clickEnabled; excludedBundleIDs = theme.excludedBundleIDs
         var pool: [String: Data] = [:]
         func archive(_ clip: CursorClip) -> Clip {
@@ -73,6 +74,7 @@ struct ThemeArchive: Codable {
                               variants: variants, selectedVariants: role.selectedVariants ?? [:])
         }
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
+        theme.pointerScale = pointerScale ?? 1
         theme.idleDelay = idleDelay; theme.idleEnabled = idleEnabled; theme.clickEnabled = clickEnabled
         theme.excludedBundleIDs = excludedBundleIDs
         try theme.validate(); return theme

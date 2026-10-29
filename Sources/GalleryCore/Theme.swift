@@ -141,6 +141,8 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public var name: String
     public var author: String
     public var roles: [CursorRole]
+    /// Multiplies each role's size, independently for this theme.
+    public var pointerScale: Double = 1
     public var idleDelay: Double = 8
     public var idleEnabled = true
     public var clickEnabled = true
@@ -148,10 +150,25 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public init(name: String, author: String = "", roles: [CursorRole]) {
         self.name = name; self.author = author; self.roles = roles
     }
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion, name, author, roles, pointerScale, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try c.decode(Int.self, forKey: .formatVersion)
+        name = try c.decode(String.self, forKey: .name)
+        author = try c.decode(String.self, forKey: .author)
+        roles = try c.decode([CursorRole].self, forKey: .roles)
+        pointerScale = try c.decodeIfPresent(Double.self, forKey: .pointerScale) ?? 1
+        idleDelay = try c.decode(Double.self, forKey: .idleDelay)
+        idleEnabled = try c.decode(Bool.self, forKey: .idleEnabled)
+        clickEnabled = try c.decode(Bool.self, forKey: .clickEnabled)
+        excludedBundleIDs = try c.decode([String].self, forKey: .excludedBundleIDs)
+    }
     public func validate() throws {
         guard formatVersion == 1, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !roles.isEmpty, roles.count <= 80, Set(roles.map(\.id)).count == roles.count,
-              idleDelay.isFinite, (1...600).contains(idleDelay) else {
+              idleDelay.isFinite, (1...600).contains(idleDelay), pointerScale.isFinite, (0.5...3).contains(pointerScale) else {
             throw ThemeError.invalid("主题格式、角色或待机时间无效。")
         }
         for role in roles {

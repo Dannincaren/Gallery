@@ -4,9 +4,6 @@ import ServiceManagement
 
 @MainActor
 final class AppPreferences: ObservableObject {
-    @Published var pointerScale: Double {
-        didSet { if pointerScale != oldValue { UserDefaults.standard.set(pointerScale, forKey: "pointerScale") } }
-    }
     @Published var applyAtLaunch: Bool {
         didSet { UserDefaults.standard.set(applyAtLaunch, forKey: "applyAtLaunch") }
     }
@@ -21,8 +18,6 @@ final class AppPreferences: ObservableObject {
     @Published private(set) var dockIconHidden = false
     @Published var error: String?
     init() {
-        let saved = UserDefaults.standard.double(forKey: "pointerScale")
-        pointerScale = saved.isFinite && (0.5...3).contains(saved) ? saved : 1
         applyAtLaunch = UserDefaults.standard.bool(forKey: "applyAtLaunch")
         hideDockIconWhileRunning = UserDefaults.standard.bool(forKey: "hideDockIconWhileRunning")
         shakeToLocate = UserDefaults.standard.bool(forKey: "shakeToLocate")

@@ -22,6 +22,7 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("per-theme overall size, legacy archives and cape geometry", regression.testThemeScaleArchivesLegacyAndCape),
     ("ANI whole-file size compatibility with strict chunk bounds", imports.testANIWholeFileSizeCompatibilityAndTruncation),
     ("gallery cover caches only arrow first frame and upgrades legacy index", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
     ("Windows INF mapping, actions and unclassified assets", imports.testWindowsINFMappingAndUnclassifiedAssets),
