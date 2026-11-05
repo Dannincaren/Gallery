@@ -3,6 +3,119 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testAppearanceInvalidatesPersistedPreviews() throws {
+        let context = CGContext(data: nil, width: 97, height: 97, bitsPerComponent: 8, bytesPerRow: 388,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(NSColor.white.cgColor); context.fill(CGRect(x: 0, y: 0, width: 97, height: 97))
+        context.setFillColor(NSColor.black.cgColor); context.fill(CGRect(x: 0, y: 0, width: 49, height: 97))
+        let data = try CursorImages.png(context.makeImage()!)
+        let clip = CursorClip(frames: [data, data], width: 32, height: 32, hotX: 4, hotY: 4)
+        var theme = GalleryTheme(name: "Preview", roles: [CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])])
+        theme.coverFrame = data
+        let id = UUID().uuidString, plain = ThemeLibrary.thumbnails(id: id, theme: theme, previous: nil)
+        expectFalse(ThemeLibrary.needsThumbnails(plain))
+        theme.appearance.shadow = true
+        let shadow = ThemeLibrary.thumbnails(id: id, theme: theme, previous: plain)
+        expectFalse(shadow.coverKey == plain.coverKey); expectFalse(shadow.cover == plain.cover)
+        expectFalse(shadow.roles[0].thumbnailKey == plain.roles[0].thumbnailKey)
+        expectFalse(shadow.roles[0].thumbnail == plain.roles[0].thumbnail)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: shadow), shadow)
+        expectFalse(try CursorImages.bitmap(require(shadow.cover)).width > 192)
+        expectFalse(try CursorImages.bitmap(require(shadow.roles[0].thumbnail)).width > 64)
+        theme.appearance.shadow = false; theme.appearance.smoothEdges = false
+        let sharp = ThemeLibrary.thumbnails(id: id, theme: theme, previous: plain)
+        expectFalse(sharp.roles[0].thumbnailKey == plain.roles[0].thumbnailKey)
+        expectFalse(sharp.roles[0].thumbnail == plain.roles[0].thumbnail)
+        expectEqual(theme.roles[0].clip(.normal), clip); expectEqual(theme.coverFrame, data)
+        var legacy = plain; legacy.coverKey = "old"; legacy.roles[0].thumbnailKey = "old"
+        expectEqual(ThemeLibrary.needsThumbnails(legacy), true)
+        expectFalse(ThemeLibrary.needsThumbnails(ThemeLibrary.thumbnails(id: id, theme: theme, previous: legacy)))
+    }
+    func testFingerprintThresholdBoundariesAndObservationReuse() throws {
+        var values: [CursorFingerprint] = [], observations: [(CGImage, CursorClip)] = []
+        var matcher = CursorMatcher()
+        for i in 0..<32 {
+            let data = try ImportTests().frame(NSColor(calibratedRed: Double(i % 8) / 7,
+                green: Double((i * 7) % 17) / 16, blue: Double((i * 11) % 19) / 18, alpha: 1))
+            let clip = CursorClip(frames: [data], width: 24, height: 24, hotX: Double(i % 3) * 6, hotY: 2)
+            let image = try CursorImages.bitmap(data)
+            values.append(try require(CursorFingerprint(image: image, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)))
+            observations.append((image, clip)); matcher.add(clip, role: "fixture.\(i)", applied: i % 2 == 0)
+        }
+        for lhs in values { for rhs in values {
+            let distance = lhs.distance(to: rhs)
+            var thresholds = [0.0, 0.012, 0.075, 1.0]
+            if distance.isFinite {
+                thresholds += [distance, distance.nextUp]
+                if distance > 0 { thresholds.append(distance.nextDown) }
+            }
+            for threshold in thresholds {
+                expectEqual(lhs.matches(rhs, maximumDistance: threshold), distance <= threshold)
+            }
+        } }
+        for ((image, clip), sample) in zip(observations, values) {
+            let direct = matcher.identify(image: image, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
+            let reused = matcher.identify(image: image, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY, sample: sample)
+            expectEqual(direct, reused)
+        }
+    }
+    func testSystemPixelAlignmentKeepsSourceGeometry() throws {
+        let source = CursorClip(frames: [try ImportTests().frame(.red)], width: 32, height: 32, hotX: 7, hotY: 14)
+        let scaled = source.scaled(by: 1.85), aligned = scaled.alignedToPixels()
+        expectEqual(aligned.width, 59); expectEqual(aligned.height, 59)
+        expectEqual(aligned.hotX, 13); expectEqual(aligned.hotY, 26)
+        expectEqual(scaled.width, 59.2); expectEqual(source.hotX, 7)
+        expectEqual(aligned.frames, source.frames)
+        expectEqual(aligned.alignedToPixels(), aligned)
+        for scale in [0.01, 0.0625, 0.25, 0.5, 1, 1.425, 1.85, 2, 3, 100] {
+            var edge = source; edge.hotX = 31.9; edge.hotY = 31.9
+            let clip = edge.scaled(by: scale).alignedToPixels()
+            try clip.validate()
+            expectEqual(clip.hotX.rounded(), clip.hotX); expectEqual(clip.hotY.rounded(), clip.hotY)
+            for data in try CursorImages.capeDictionary(clip)["Representations"] as! [Data] {
+                let bitmap = try CursorImages.bitmap(data)
+                expectEqual(Double(bitmap.width).truncatingRemainder(dividingBy: clip.width), 0)
+            }
+        }
+    }
+    func testAppearanceCacheGeometryArchiveAndSharpSampling() throws {
+        let pixels: [UInt8] = [255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255]
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        let image = CGImage(width: 2, height: 2, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let data = try CursorImages.png(image)
+        let original = CursorClip(frames: [data, data], frameDuration: 0.2, width: 17, height: 17, hotX: 3, hotY: 5)
+        var off = CursorAppearanceRenderer(CursorAppearance())
+        expectEqual(try off.render(original), original)
+        var renderer = CursorAppearanceRenderer(CursorAppearance(shadow: true))
+        let shadow = try renderer.render(original)
+        expectEqual(shadow.frames[0], shadow.frames[1]); expectEqual(shadow.duration, original.duration)
+        expectEqual(shadow.width, 25); expectEqual(shadow.height, 25)
+        expectEqual(shadow.hotX, 7); expectEqual(shadow.hotY, 9)
+        expectEqual(try renderer.render(original), shadow)
+        expectEqual(try CursorImages.bitmap(shadow.frames[0]).width, 75)
+        var large = original; large.width = 128; large.height = 128
+        let bounded = try renderer.render(large); try bounded.validate()
+        expectEqual(bounded.width, 128); expectEqual(bounded.hotX, 3 * 120 / 128 + 4)
+        let smooth = try CursorImages.capeDictionary(original, smoothEdges: true)
+        let sharp = try CursorImages.capeDictionary(original, smoothEdges: false)
+        expectFalse((smooth["Representations"] as! [Data]) == (sharp["Representations"] as! [Data]))
+        var theme = GalleryTheme(name: "Appearance", roles: [CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": original])])
+        theme.appearance = CursorAppearance(smoothEdges: false, shadow: true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gallery")
+        let cape = url.deletingPathExtension().appendingPathExtension("cape")
+        defer { try? FileManager.default.removeItem(at: url); try? FileManager.default.removeItem(at: cape) }
+        try ThemeFiles.save(theme, to: url); expectEqual(try ThemeFiles.load(url), theme)
+        try ThemeFiles.exportCape(theme, to: cape)
+        let exported = try ThemeFiles.load(cape)
+        expectEqual(exported.roles[0].clip(.normal)?.width, shadow.width)
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        json.removeValue(forKey: "appearance")
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        expectEqual(try ThemeFiles.load(url).appearance, CursorAppearance())
+        expectEqual(theme.roles[0].clip(.normal), original)
+    }
     func testThemeScaleArchivesLegacyAndCape() throws {
         let clip = CursorClip(frames: [try ImportTests().frame(.red)], width: 24, height: 24, hotX: 2, hotY: 3)
         let role = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip], scale: 1.5)
@@ -30,7 +143,17 @@ final class RegressionTests {
         expectEqual(restored.roles[0].clip(.normal)?.hotY, 9)
         expectEqual(restored.pointerScale, 1) // exported geometry already includes both scales
         expectEqual(theme.roles[0].clip(.normal), clip)
-        for value in [Double.nan, .infinity, 0.49, 3.01] {
+        var small = theme; small.pointerScale = 0.25; small.roles[0].scale = 0.25
+        try ThemeFiles.save(small, to: url)
+        expectEqual(try ThemeFiles.load(url), small)
+        try ThemeFiles.exportCape(small, to: cape)
+        let smallExport = try ThemeFiles.load(cape).roles[0].clip(.normal)!
+        expectEqual(smallExport.width, 1.5)
+        expectEqual(smallExport.hotX, 0.125); expectEqual(smallExport.hotY, 0.1875)
+        expectEqual(small.roles[0].clip(.normal), clip)
+        var invalidRole = small; invalidRole.roles[0].scale = 0.249
+        expectThrows(try invalidRole.validate())
+        for value in [Double.nan, .infinity, 0.24, 3.01] {
             var invalid = theme; invalid.pointerScale = value
             expectThrows(try invalid.validate())
         }

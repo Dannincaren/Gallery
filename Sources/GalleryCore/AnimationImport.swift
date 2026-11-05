@@ -97,7 +97,7 @@ public enum AnimationImport {
               String(data: data[8..<12], encoding: .ascii) == "ACON" else { throw ThemeError.invalid("无效 ANI 文件头。") }
         let declaredSize = try u32(data, 4)
         // Some Windows exporters include the RIFF header in its own size field
-        // (e.g. Angelina). Accept only this exact eight-byte discrepancy. Parse
+        // (including legacy exporters). Accept only this exact eight-byte discrepancy. Parse
         // against the real buffer and still require complete, bounded chunks.
         guard declaredSize == data.count - 8 || declaredSize == data.count else {
             throw ThemeError.invalid("ANI 声明长度与实际文件不符，文件可能已截断。")
@@ -136,7 +136,7 @@ public enum AnimationImport {
         let indices = sequence.isEmpty ? (0..<steps).map { $0 % frames.count } : sequence
         guard indices.count == steps, indices.allSatisfy({ $0 < frames.count }) else { throw ThemeError.invalid("ANI 帧索引越界。") }
         var durations = (0..<steps).map { Double($0 < rates.count ? max(1, rates[$0]) : defaultRate) / 60 }
-        // PRTS one-shot ANI files use a ~60-second final frame to stop Windows
+        // Some one-shot ANI files use a ~60-second final frame to stop Windows
         // from looping. It is a freeze sentinel, not part of the transition.
         // Gallery owns hold/release timing, so preserve the transition and trim
         // only that terminal sentinel; do not uniformly sample a minute of stills.

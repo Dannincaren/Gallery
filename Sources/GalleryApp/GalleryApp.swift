@@ -43,7 +43,7 @@ struct GalleryApp: App {
     init() {
         if let index = CommandLine.arguments.firstIndex(where: { ["--convert-prts", "--convert-windows"].contains($0) }), CommandLine.arguments.count > index + 2 {
             do {
-                let theme = try PRTSImport.load(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+                let theme = try WindowsThemeImport.load(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
                 try ThemeFiles.save(theme, to: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
                 print("Converted \(theme.roles.count) system variants / \(Set(theme.roles.map(\.name)).count) categories")
                 exit(0)

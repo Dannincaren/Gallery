@@ -1,160 +1,78 @@
-# Gallery
+# Gallery — animated cursors for macOS
 
-基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 光标注册机制的 macOS
-交互光标编辑器。重点改善日常桌面与应用之间的体验：待机、按下、按住、松手，
-以及不离开应用即可完成的热点和动画编辑。
+**Custom mouse pointers with idle, press, hold and release animations. Import Windows CUR/ANI cursor themes, edit hotspots and sizes, and use them across your Mac.**
 
-**0.7.3 是实验版本。** 已实现导入、编辑和原生光标运行路径；实际跨应用效果
-需要在目标 macOS 上验证。私有接口存在版本差异，不能承诺支持所有应用。
-0.7.3 支持拖拽主题卡片自定义顺序并自动保存，标题使用哥特字体。保留各主题独立大小、静态主题橱窗，以及 Windows 光标 EXE、文件夹、INF 和 ZIP 导入。
-Chrome 地址栏点按后的箭头状态、Finder 文件夹拖放松手的偶发抽动暂缓处理。
-版本内容与验证边界见 [0.7.3 发布说明](Documentation/RELEASE-0.7.3.md)。
+[Download the latest release](https://github.com/Danningcarer/Gallery/releases/latest) · [中文说明](README.zh-CN.md) · [Report a bug](https://github.com/Danningcarer/Gallery/issues/new)
 
-## 当前功能
+macOS 14 or later · Apple Silicon and Intel · SwiftUI · Source available for noncommercial use
 
-- SwiftUI 编辑器：五种状态、逐帧预览、热点点选／数值调整、显示大小和帧率。
-- 替换、追加、复制当前帧、前移、后移和删除帧；支持 PNG 序列、GIF、CUR、ANI。
-- 读取 `.cape`，保存含交互设置的 `.gallery`；可导出常态 `.cape`。
-- 直接读取内嵌 CUR／ANI 的 .NET EXE（包括 PRTS、mon3tr 这类安装器），不执行安装程序。
-- 导入含 CUR／ANI 和 INF 的文件夹、ZIP，或直接选择 INF；按安装配置匹配角色，没有配置时识别常见文件名，未知素材保留供混用。
-- 优先会话级只读鼠标监听；未授权时使用系统鼠标事件监听，无法监听时使用计数和位置采样，关闭编辑窗口后继续运行。
-- 同一角色和动作可保留多套素材，通过「素材版本」选择静态或动态版本；各版本的编辑及图片随主题导出。
-- 自动按素材决定交互：有「按住」动画时保持到松手；只有「按下、松手」时自动连播，无需额外开关。旧主题也适用。
-- WindowServer 实际光标读取、标准光标缓存识别与尺寸归一化；未知状态不会关闭整个运行层。
-- 可配置全局默认与各角色独立待机时间、交互开关及暂停交互的应用列表。
-- 全局与单角色大小滑块（各 50%–300%，组合后最大 128 逻辑点）；保持未知应用自定义光标的原有大小。
-- 主题以方形橱窗卡片展示，封面缓存自选帧（默认 arrow 首帧），始终静态；支持名称搜索、拖动卡片自定义排序，点击卡片进入子页面。
-- 卡片标记「正在使用」，打开主题只浏览；右下角菜单与右键菜单支持使用／停用、重命名、两种导出与整套删除。删除正在使用的主题时先恢复系统光标。
-- 单角色可使用系统原有光标，或复制其他主题的角色素材；混合后的主题可独立导出。
-- 系统登录项与启动后自动应用主题选项，默认关闭。
-- 启用主题时隐藏 Dock 图标、快速甩动时临时放大主题光标，均可独立开关。
-- 替换前原子写入恢复记录；停用、退出或注册失败时尝试恢复启用前的光标。
-- 锁屏、休眠及用户切换时尽量回到常态，不追求安全界面中的交互效果。
+## Start in three steps
 
-## 构建与使用
+1. Download `Gallery-macOS.zip` from **Releases**, unzip it and move **Gallery.app** to **Applications**.
+2. Open Gallery and choose **+**. Import a `.gallery` or `.cape` theme, a CUR/ANI file, an INF file, a cursor folder, ZIP, or a supported Windows installer. Packages containing multiple sets or variants open a selection and preview screen.
+3. Click a theme card to select it, then click **▶** to apply it. Click the selected or active card to edit its cursor roles. **⏸** restores the original cursors; the menu bar remains available when the window is closed.
 
-需要 macOS 14+ 和 Swift 5.9+（Xcode 或 Command Line Tools），无外部包依赖。
+The interface currently uses Simplified Chinese. **导入** means Import, **使用** means Apply, and **停用并恢复** means Stop and Restore. A built-in, original demo lets you try the app without downloading artwork.
+
+## What it does
+
+- **Animated macOS cursors:** normal and idle loops, immediate press, held-button and release states. A hold asset automatically enables hold-until-release behavior.
+- **Cursor editor:** frame preview, duplicate/reorder frames, replace images, edit the hotspot, adjust animation timing, and pick a frame as the theme cover.
+- **Independent sizing:** per-theme overall size and per-role size (25–300% each), with sliders and numeric input. Unrecognized application-owned cursors keep their original size.
+- **Theme library:** static cover cards, search, drag-to-reorder, clear active/selected states, per-theme export and deletion, and mixing a role from another theme or using a native cursor.
+- **Appearance:** optional smoothing and baked shadows. Covers and role thumbnails regenerate when appearance changes; cards do not continuously animate.
+- **Desktop integration:** optional launch at login, apply at launch, hide the Dock icon, shake-to-enlarge, and per-application interaction exclusions.
+
+## Import compatibility
+
+| Input | Supported content |
+| --- | --- |
+| `.gallery` | Full Gallery themes, variants and interaction settings |
+| `.cape` | Mousecape normal-state cursors and animations |
+| `.cur` / `.ani` | A standalone cursor, or files inside a folder/ZIP; source timing and hotspots are preserved |
+| `.inf` | Windows cursor-role declarations; referenced CUR/ANI files must accompany the INF |
+| Folder / `.zip` | Cursor sets with or without INF; independent configured subfolders can be imported separately |
+| `.exe` | Embedded managed resources in supported .NET installers, .NET single-file bundles, Inno Setup, and ZIP self-extractors |
+
+**Windows executables are read as data and never run.** Gallery keeps cursor material and necessary configuration, skipping wallpaper, application icons and unrelated programs. Installers are not a universal format: encrypted archives, missing companion data and other custom packers may require extracting the CUR/ANI files first.
+
+ZIP handling supports stored/Deflate entries, ZIP64, common Unicode and legacy Chinese filenames, and integrity checks. Other compression methods use the system extractor when available. ZIP/EXE inputs may be up to **2 GB**; extracted cursor data, counts and image dimensions have separate limits. See [compatibility and limits](Documentation/COMPATIBILITY.md).
+
+## Permissions and recovery
+
+Input Monitoring enables the mouse-only session listener for more reliable input delivery. Gallery does not record keyboard input or ask for Accessibility permission. A fallback mouse-event/counter path is used when session listening is unavailable; responsiveness can vary between applications.
+
+Gallery backs up cursor resources before applying a theme. Stop or quit normally to restore them. After a crash or force quit, reopen Gallery and use the recovery action. Avoid running another cursor-replacement app at the same time.
+
+Gallery uses private macOS cursor interfaces. Some custom application cursors and system security screens may remain native; compatibility can change with macOS updates. Releases are currently ad-hoc signed and **not Developer ID notarized**. See [troubleshooting](Documentation/TROUBLESHOOTING.md).
+
+## Performance
+
+The cursor position and compositing stay with macOS. Short normal animations use native playback; longer animations and interactions reuse bounded prepared-frame caches. Static cards and thumbnails stay still, and previews stop when hidden. Performance work prioritizes click response, then CPU/energy, then package size.
+
+[Performance measurements](Documentation/PERFORMANCE-1.0.0.md) distinguish processing time from hardware-to-display latency. No increased polling frequency or reduced animation frame rate is used to claim an improvement.
+
+## Build and test
+
+Build with **Xcode 26.2+ or its Command Line Tools**, targeting macOS 14+. Both architectures are included by the release script. The separate import helper uses pinned, verified dependencies downloaded on the first build; the app has no Homebrew runtime dependency.
 
 ```sh
 bash Scripts/check.sh
-bash Scripts/build.sh
-open dist/Gallery.app
-```
-
-`dist/Gallery-macOS.zip` 是可分发的应用包。默认仅构建本机架构、使用临时签名，
-尚未由 Developer ID 签名或公证。需要 Universal 包时：
-
-```sh
 GALLERY_UNIVERSAL=1 bash Scripts/build.sh
 ```
 
-1. 首次打开仅显示编辑器，不自动修改系统光标。
-2. 可先预览内置「Gallery · 光晕」主题；或导入已有 `.cape`。
-3. 使用 PRTS 时，优先导入已整理的 `.gallery`；也可选择或拖入原版完整 Windows ZIP。
-   EXE 必须选择「程序文件/PRTS-Setup.exe」；PRTS-Install.exe 只是入口，无法提取素材。
-   其他主题可直接选择内嵌光标的 EXE、解压后的素材文件夹、安装 INF 或 ZIP；也可拖入窗口。
-   同一个「导入主题」入口自动识别文件与文件夹。EXE 使用其他封装方式时会提示改用解压后的素材，无法保证读取所有安装器。
-   兼容部分 ANI 导出器将文件头长度多计 8 字节的素材，并保留 24 位 CUR／ANI 的透明遮罩；其他截断或区块越界仍会报错，错误会指出对应素材文件名。
-4. 点击主题卡片进入子页面，在左侧选择角色，再选择「常态／待机／按下／按住／松手」编辑；更改自动保存在本机。
-   顶部「主题橱窗」返回卡片目录，返回后编辑器预览停止。
-   目录的「调整顺序」开启卡片拖拽，沿网格拖动时其他卡片实时让位，松手提交，取消则恢复原位，完成后点击「完成排序」；顺序自动保存。
-   卡片菜单也支持向前／向后、移到最前／最后。搜索时清空关键词再拖拽排序，新导入的主题追加在最后。
-   「主题整体大小」只作用于本主题，叠加每个角色的独立大小；每套主题单独保存，导出 Gallery 和常态 Cape 时也保留相应尺寸。
-   升级前已有的主题首次读取时沿用原应用级大小，随后各自保存；新导入的无大小设置主题从 100% 开始。
-   切换来源、素材版本、选择系统原有光标和编辑帧前先暂停。
-   在帧序列里可将「当前帧」设为主题封面，或恢复默认封面；封面为静态快照并随 Gallery 主题保存。
-   原安装器重新导入后可选择其中的静态／动态备选；也可用「添加其他版本」补充 PNG、GIF、CUR 或 ANI。
-   旧归档已丢弃的备选图片无法自动恢复，需要重新导入原文件。
-5. 卡片右下角菜单中的「使用此主题」可直接切换；子页面顶部也保留使用入口。卡片标记和顶部状态显示当前实际使用的主题名称。
-   开启启动后自动应用时，优先恢复上次成功使用的主题。若跨应用不响应，在交互设置中检查输入监控授权。
-6. 点击「停用并恢复」还原启用前的光标。编辑时先暂停，修改后重新应用。
-7. 卡片右下角菜单、卡片右键菜单和主题子页面内的主题菜单均可「删除整个主题」。确认后移入废纸篓，原始素材文件保留。
-   删除最后一套时回到内置示例；找回主题时将废纸篓中的 `.gallery` 文件取出并重新导入。
+The result is `dist/Gallery.app` and `dist/Gallery-macOS.zip`. Local debug symbols are kept in `dist/Symbols`. Core checks use synthetic assets and do not modify the system cursor. System cursor checks are opt-in and should run after stopping any existing cursor replacement.
 
-请先停用 Mousecape 的自动重应用助手。Gallery 不需要另行运行 Mousecape，
-两个工具同时重新注册资源可能互相覆盖。关闭 Gallery 窗口后仍可从菜单栏控制；
-真正退出时会尝试恢复光标。
-
-## 实现边界
-
-常态资源通过 Mousecape 的 `CGSRegisterCursorWithImages` 路径应用，提供真实的
-1x/2x/3x 图像条带并刷新 CoreCursor 缓存。可备份的 ArrowS / IBeamS 兼容别名一并注册。
-命中注册的静态图像时直接使用系统资源；前台程序的旧缓存绕过注册时，用缓存的 NSCursor 补足。
-运行层没有跟随窗口，也不隐藏系统光标；位置、可见性、全屏和 Spaces 合成由 macOS 管理。
-交互及多帧常态通过系统光标通道提交缓存帧，最多每秒 60 次。后台识别过滤自身提交的种子，避免动画反馈为错误角色。
-大小变更只调整当前缓存光标的逻辑几何，不重新生成整套条带；下次应用主题时按当前大小注册。
-静态停留约每 200 毫秒检查一次；输入直接请求更新，移动本身不启动高频渲染。连续重复帧按原时长保持，不重复提交。调度中心常态采用第一帧，点按时可播放交互动画。
-静态或不可见编辑器不刷新动画预览，启用主题时禁用播放按钮。角色缩略图一次生成并持久化，不实时播放。
-私有符号动态查找，缺失时保留编辑器并报告运行层错误。
-
-运行层识别实际 WindowServer 光标，并学习标准光标及启用前主题的图像。
-包含真实箭头 CoreCursor 0 和文本 CoreCursor 1，保留所有分辨率表示。
-WindowServer 动画条带按已知帧数解析并匹配首、中、尾帧。透明留白和缩放差异通过可见边界归一化处理。
-应用自绘且无法识别的光标会暂时跳过；回到已知状态时恢复该类指针的交互。
-不将未知状态强行视为箭头，重复图像的角色仍可能无法精确区分。原生常态及导出 Mousecape 最多使用 24 帧；交互显示和预览保留完整帧序列。
-
-PRTS 导入包含 20 类指针、46 个资源变体（含 3 类仅素材状态）：正常、帮助、链接、后台运行、忙、精准、文本、
-竖排文本、移动、候选、水平/垂直/对角调整、不可用及拖放等。编辑器按类别合并显示系统别名。
-手写、定位、人员选择在 macOS 没有统一系统状态，保留为可编辑素材，不伪造全局映射。
-待机目前使用循环片段，未串接独立的进入/退出片段；未提供专门拖窗动画识别。
-Windows 点按/松手 ANI 的长尾冻结帧由转换器裁去，避免将实际动作拉长到约 60 秒。
-原有 `.cape` 的常态角色也可导入和编辑。
-
-自启动使用 [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp)，
-请先放入「应用程序」，再在「交互与应用设置」中开启；也可独立选择启动后自动应用主题。
-当前未实现 App Store 发布、签名公证、锁屏交互或全应用兼容承诺。
-启用前必须成功备份某个角色，才会修改该角色。进程被强制杀死时无法执行退出
-恢复：重新打开后使用「恢复上次光标」，必要时注销重新登录。
-
-## 本地文件
-
-- `~/Library/Application Support/Gallery/current.gallery`：当前主题的兼容副本。
-- `~/Library/Application Support/Gallery/Themes/<UUID>.gallery`：各主题的独立归档。
-- `~/Library/Application Support/Gallery/themes.json`：目录名称、角色摘要、每角色最大 64 像素缩略图，以及每主题最大 192 像素的静态 arrow 封面。
-- `~/Library/Application Support/Gallery/recovery.plist`：启用前的恢复记录。
-- 导出的 `.gallery` 包含图片与交互设置，不需要手工修改配置后重新导入。
-
-## 验证
-
-`Scripts/check.sh` 使用独立 Swift 检查程序，不依赖 XCTest 或完整 Xcode。
-覆盖快速点击、中断、待机、热点、帧序和异常文件拒绝。
-
-可以使用用户自己下载的安装器增加真实素材集成检查：
+To convert a supported Windows cursor package without opening the editor:
 
 ```sh
-GALLERY_PRTS_EXE=/path/to/PRTS-Setup.exe bash Scripts/check.sh
+Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-Windows 通用导入只解析内嵌 CUR／ANI、安装 INF 中的角色声明和字符串，不执行 EXE、INF 命令或注册表操作。
-支持 UTF-8、UTF-16 及常见中文编码；INF 声明优先于文件名推断。原素材没有按下／按住／松手片段时，不会凭空生成这些动画。
+See [testing](Documentation/TESTING.md) and the [1.0.0 release notes](Documentation/RELEASE-1.0.0.md).
 
-主题使用去重的 v2 图像库保存，旧版 v1 主题可直接打开；不需要手工改配置。
-可在本机生成独立 PRTS 主题（不运行 EXE）：
+## License and artwork
 
-```sh
-dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursor.exe /path/to/Theme.gallery
-```
+Gallery extends [Mousecape](https://github.com/alexzielenski/Mousecape) and retains its **noncommercial license**. This is source-available software, not an MIT-licensed or unrestricted open-source project. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
-桌面集成验证在另一个前台测试窗口中运行：
-
-```sh
-bash Scripts/runtime-check.sh /tmp/gallery-check /path/to/PRTS.gallery
-```
-
-请先退出 Gallery 和其他光标工具。检查程序使用独立恢复记录，验证系统图像帧、快速切换、
-独立大小、点按、自身帧过滤和停用恢复；不移动鼠标、不注入系统输入、不切换应用。
-调度中心采用状态注入检查，真实 Dock 悬停及三指空间切换需手工复测。
-
-`Scripts/editor-check.sh /tmp/gallery-editor-check` 在独立目录验证迁移、目录切换、复制帧和混合角色保存。
-性能基准与边界见 [性能记录](Documentation/PERFORMANCE.md)。
-
-`Gallery.app/Contents/MacOS/Gallery --self-check` 只检查原生符号，不修改光标。
-GitHub Actions 构建 Universal 应用并上传 ZIP；跨应用验证步骤见
-[测试清单](Documentation/TESTING.md)。
-
-## 许可与来源
-
-保留 Mousecape 的**非商业许可**，见 [LICENSE](LICENSE)、
-[第三方声明](THIRD_PARTY_NOTICES.md) 和 [上游记录](Vendor/Mousecape/UPSTREAM.md)。
-不是 MIT 许可，也不是 Mousecape 官方版本。PRTS 和游戏素材由用户本地导入，
-不随仓库或应用分发。
+Third-party cursor artwork and Windows installers are not included. Import your own legally obtained material; importing does not grant permission to redistribute it.

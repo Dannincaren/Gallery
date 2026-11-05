@@ -19,8 +19,9 @@ public struct LibraryTheme: Codable, Equatable, Identifiable, Sendable {
     public var roles: [LibraryRole]
     public var cover: Data?
     public var coverKey: String?
+    public var appearance: CursorAppearance?
     public init(id: String = UUID().uuidString, theme: GalleryTheme) {
-        self.id = id; name = theme.name
+        self.id = id; name = theme.name; appearance = theme.appearance
         var names = Set<String>()
         roles = theme.roles.filter { names.insert(CursorCatalog.family($0.id)).inserted }.map(LibraryRole.init)
     }
@@ -29,30 +30,59 @@ public struct LibraryTheme: Codable, Equatable, Identifiable, Sendable {
 /// The index contains labels and small cached thumbnails; animation frames
 /// stay in standalone theme archives, which remain portable when roles mix.
 public enum ThemeLibrary {
+    private static let previewVersion = "3:"
+    public static func needsThumbnails(_ row: LibraryTheme) -> Bool {
+        let hasCover = row.cover != nil || row.roles.contains(where: { CursorCatalog.isArrow($0.id) })
+        return hasCover && (row.cover == nil || row.coverKey?.hasPrefix(previewVersion) != true)
+            || row.roles.contains { $0.thumbnail == nil || $0.thumbnailKey?.hasPrefix(previewVersion) != true }
+    }
     /// Called on the file queue, never in a SwiftUI body or cursor callback.
     /// A persisted 64px image avoids retaining full animation frames per row.
     public static func thumbnails(id: String, theme: GalleryTheme, previous: LibraryTheme?) -> LibraryTheme {
         var row = LibraryTheme(id: id, theme: theme)
+        var decoded: [Data: CGImage] = [:]
+        func geometry(for frame: Data) -> CursorClip {
+            for role in theme.roles { for clip in role.clips.values where clip.frames.contains(frame) { return clip } }
+            let image = try? CursorImages.bitmap(frame)
+            let width = Double(image?.width ?? 32), height = Double(image?.height ?? 32)
+            let ratio = min(1, 128 / max(width, height))
+            return CursorClip(frames: [frame], width: width * ratio, height: height * ratio)
+        }
+        func key(_ frame: Data, _ clip: CursorClip) -> String {
+            var hash = SHA256(); hash.update(data: frame)
+            hash.update(data: Data("\(theme.appearance.smoothEdges):\(theme.appearance.shadow):\(clip.width):\(clip.height)".utf8))
+            return previewVersion + hash.finalize().map { String(format: "%02x", $0) }.joined()
+        }
+        func thumbnail(_ frame: Data, _ clip: CursorClip, maximum: Int) -> Data? {
+            if decoded[frame] == nil { decoded[frame] = try? CursorImages.bitmap(frame) }
+            guard let image = decoded[frame] else { return nil }
+            let padding = theme.appearance.shadow ? 4.0 : 0
+            let width = clip.width + 2 * padding, height = clip.height + 2 * padding
+            let scale = min(Double(maximum) / max(width, height), Double(image.width) / clip.width)
+            let pixelsWide = max(1, Int((width * scale).rounded())), pixelsHigh = max(1, Int((height * scale).rounded()))
+            guard let context = CGContext(data: nil, width: pixelsWide, height: pixelsHigh, bitsPerComponent: 8, bytesPerRow: pixelsWide * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            context.interpolationQuality = theme.appearance.smoothEdges ? .high : .none
+            context.setShouldAntialias(theme.appearance.smoothEdges)
+            if theme.appearance.shadow {
+                context.setShadow(offset: CGSize(width: 0, height: -scale), blur: 1.5 * scale, color: CGColor(gray: 0, alpha: 0.32))
+            }
+            context.draw(image, in: CGRect(x: padding * scale, y: padding * scale, width: clip.width * scale, height: clip.height * scale))
+            return context.makeImage().flatMap { try? CursorImages.png($0) }
+        }
         if let frame = theme.coverFrame ?? theme.roles.first(where: { CursorCatalog.isArrow($0.id) })?.clip(.normal)?.frames.first {
-            let key = SHA256.hash(data: frame).map { String(format: "%02x", $0) }.joined()
+            let clip = geometry(for: frame), key = key(frame, clip)
             row.coverKey = key
             if previous?.coverKey == key, let cover = previous?.cover { row.cover = cover }
-            else if let source = CGImageSourceCreateWithData(frame as CFData, nil),
-                    let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 192, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) {
-                row.cover = try? CursorImages.png(image)
-            }
+            else { row.cover = thumbnail(frame, clip, maximum: 192) }
         }
         for i in row.roles.indices {
-            guard let role = theme.roles.first(where: { $0.id == row.roles[i].id }), let frame = role.clip(.normal)?.frames.first else { continue }
-            let key = SHA256.hash(data: frame).map { String(format: "%02x", $0) }.joined()
+            guard let role = theme.roles.first(where: { $0.id == row.roles[i].id }), let clip = role.clip(.normal), let frame = clip.frames.first else { continue }
+            let key = key(frame, clip)
             if let old = previous?.roles.first(where: { $0.id == role.id }), old.thumbnailKey == key, old.thumbnail != nil {
                 row.roles[i].thumbnail = old.thumbnail; row.roles[i].thumbnailKey = key; continue
             }
-            guard let source = CGImageSourceCreateWithData(frame as CFData, nil),
-                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                      kCGImageSourceThumbnailMaxPixelSize: 64, kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-                  let png = try? CursorImages.png(image) else { continue }
+            guard let png = thumbnail(frame, clip, maximum: 64) else { continue }
             row.roles[i].thumbnail = png; row.roles[i].thumbnailKey = key
         }
         return row

@@ -48,33 +48,41 @@ public enum CursorImages {
         try clip.validate()
         return clip
     }
-    public static func capeDictionary(_ original: CursorClip) throws -> [String: Any] {
+    public static func capeDictionary(_ original: CursorClip, smoothEdges: Bool = true) throws -> [String: Any] {
         try original.validate()
         let clip = original.sampled()
         let images = try clip.frames.map { try bitmap($0) }
-        // WindowServer selects representations by display scale, not merely by
-        // their order or arbitrary source resolution. A lone 96px image with a
-        // 32pt size could register successfully yet leave other apps on a cached
-        // cursor. Always publish real 1x, 2x and 3x filmstrips, as Mousecape does.
-        let representations = try [1.0, 2.0, 3.0].map { scale -> Data in
-            let width = max(1, Int((clip.width * scale).rounded()))
-            let height = max(1, Int((clip.height * scale).rounded()))
-            guard let context = CGContext(data: nil, width: width, height: height * images.count,
-                bitsPerComponent: 8, bytesPerRow: width * 4,
+        let representations = try rasters(images, width: clip.width, height: clip.height, smoothEdges: smoothEdges).map(png)
+        return ["FrameCount": images.count, "FrameDuration": clip.frameDuration,
+                "PointsWide": clip.width, "PointsHigh": clip.height,
+                "HotSpotX": clip.hotX, "HotSpotY": clip.hotY, "Representations": representations]
+    }
+    /// The same point grid and frame order for file export and live resources.
+    /// Live playback can pass these bitmaps straight to WindowServer, without
+    /// encoding PNG and immediately decoding it again on the input callback.
+    public static func rasters(_ images: [CGImage], width: Double, height: Double,
+                               smoothEdges: Bool = true, maximumScale: Int = 3) throws -> [CGImage] {
+        guard (1...24).contains(images.count), width.isFinite, height.isFinite,
+              (1...128).contains(width), (1...128).contains(height), (1...3).contains(maximumScale) else {
+            throw ThemeError.invalid("光标图像、大小或分辨率超出有效范围。")
+        }
+        return try (1...maximumScale).map { scale in
+            let pixelsWide = max(1, Int((width * Double(scale)).rounded()))
+            let pixelsHigh = max(1, Int((height * Double(scale)).rounded()))
+            guard let context = CGContext(data: nil, width: pixelsWide, height: pixelsHigh * images.count,
+                bitsPerComponent: 8, bytesPerRow: pixelsWide * 4,
                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
                 throw ThemeError.invalid("无法创建动画条带。")
             }
-            context.interpolationQuality = .high
+            context.interpolationQuality = smoothEdges ? .high : .none
+            context.setShouldAntialias(smoothEdges)
             for (index, image) in images.enumerated() {
-                context.draw(image, in: CGRect(x: 0, y: (images.count - index - 1) * height, width: width, height: height))
+                context.draw(image, in: CGRect(x: 0, y: (images.count - index - 1) * pixelsHigh, width: pixelsWide, height: pixelsHigh))
             }
             guard let strip = context.makeImage() else { throw ThemeError.invalid("无法创建动画条带。") }
-            return try png(strip)
+            return strip
         }
-        return ["FrameCount": images.count, "FrameDuration": clip.frameDuration,
-                "PointsWide": clip.width, "PointsHigh": clip.height,
-                "HotSpotX": clip.hotX, "HotSpotY": clip.hotY, "Representations": representations]
     }
     /// Match the bitmap AND hotspot. No semantic guessing from a position, AX
     /// role or foreground app; unknown/custom application cursors are skipped.
@@ -140,7 +148,11 @@ public enum ThemeFiles {
         try theme.validate()
         let selected = theme.roles.filter { !$0.usesNative && !CursorCatalog.assetOnly($0.id) }
         guard !selected.isEmpty else { throw ThemeError.invalid("没有需要导出的自定义光标。完整设置请保存为 Gallery 主题。") }
-        let cursors = try Dictionary(uniqueKeysWithValues: selected.map { ($0.id, try CursorImages.capeDictionary($0.clip(.normal)!.scaled(by: theme.pointerScale * $0.scale))) })
+        var appearance = CursorAppearanceRenderer(theme.appearance)
+        let cursors = try Dictionary(uniqueKeysWithValues: selected.map { role in
+            (role.id, try CursorImages.capeDictionary(appearance.render(role.clip(.normal)!).scaled(by: theme.pointerScale * role.scale),
+                                                   smoothEdges: theme.appearance.smoothEdges))
+        })
         let dictionary: [String: Any] = ["CapeName": theme.name, "Author": theme.author,
             "Identifier": "local.gallery.export", "CapeVersion": 1.0, "Version": 2.0,
             "MinimumVersion": 2.0, "HiDPI": true, "Cloud": false, "Cursors": cursors]

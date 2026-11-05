@@ -291,14 +291,37 @@ static void loadSymbols(void) {
         if (!rep.CGImage || rep.pixelsHigh % count != 0) return nil;
         [images addObject:(__bridge id)rep.CGImage];
     }
-    if (!images.count) return nil;
+    return [self prepareImages:images frameCount:count frameDuration:duration size:size hotSpot:hot];
+}
++ (GLCursorResource *)prepareImages:(NSArray *)images frameCount:(NSUInteger)count frameDuration:(NSTimeInterval)duration size:(CGSize)size hotSpot:(CGPoint)hot {
+    if (!images.count || count < 1 || count > 24 || !isfinite(duration) || duration <= 0 ||
+        !isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0 ||
+        !isfinite(hot.x) || !isfinite(hot.y) || hot.x < 0 || hot.y < 0 || hot.x >= size.width || hot.y >= size.height) return nil;
+    for (id image in images) {
+        if (CFGetTypeID((__bridge CFTypeRef)image) != CGImageGetTypeID()) return nil;
+        CGImageRef bitmap = (__bridge CGImageRef)image;
+        if (CGImageGetHeight(bitmap) % count != 0) return nil;
+    }
     GLCursorResource *resource = [GLCursorResource new];
-    resource.images = images; resource.size = size; resource.hotSpot = hot;
+    resource.images = [images copy]; resource.size = size; resource.hotSpot = hot;
     resource.count = count; resource.duration = duration;
     return resource;
 }
 + (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers {
     return [self applyPreparedCursor:cursor identifiers:identifiers showImmediately:NO];
+}
++ (int32_t)storePreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers globally:(BOOL)global {
+    if (![self available]) return -10001;
+    for (NSString *identifier in identifiers) {
+        if (!identifier.length) return -10002;
+        int seed = 0;
+        // Populate an immutable playback slot without changing the displayed
+        // cursor. Connection-local slots disappear when Gallery exits.
+        int error = registerFn(connectionFn(), identifier.UTF8String, global, false,
+            cursor.size, cursor.hotSpot, cursor.count, cursor.duration, (__bridge CFArrayRef)cursor.images, &seed);
+        if (error) return error;
+    }
+    return 0;
 }
 + (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers showImmediately:(BOOL)show {
     if (![self available]) return -10001;

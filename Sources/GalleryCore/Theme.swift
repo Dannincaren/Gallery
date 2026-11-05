@@ -56,6 +56,17 @@ public struct CursorClip: Codable, Equatable, Sendable {
         result.hotX = hotX * factor; result.hotY = hotY * factor
         return result
     }
+    /// Use one point/pixel grid for both registered resources and AppKit.
+    /// WindowServer truncates fractional cursor hotspots while AppKit can
+    /// round them. Keep that conversion at the display boundary; imported
+    /// artwork and the editor's precise geometry remain unchanged.
+    public func alignedToPixels() -> CursorClip {
+        var result = self
+        result.width = max(1, width.rounded()); result.height = max(1, height.rounded())
+        result.hotX = min(result.width - 1, max(0, (hotX * result.width / width).rounded()))
+        result.hotY = min(result.height - 1, max(0, (hotY * result.height / height).rounded()))
+        return result
+    }
     @discardableResult
     public mutating func duplicateFrame(at index: Int) throws -> Int {
         guard frames.indices.contains(index), frames.count < 240 else { throw ThemeError.invalid("无法复制这一帧：最多支持 240 帧。") }
@@ -143,6 +154,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public var roles: [CursorRole]
     /// Multiplies each role's size, independently for this theme.
     public var pointerScale: Double = 1
+    public var appearance = CursorAppearance()
     /// A static cover snapshot, independent of animation editing and playback.
     public var coverFrame: Data?
     public var idleDelay: Double = 8
@@ -153,7 +165,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         self.name = name; self.author = author; self.roles = roles
     }
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, name, author, roles, pointerScale, coverFrame, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
+        case formatVersion, name, author, roles, pointerScale, appearance, coverFrame, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -162,6 +174,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         author = try c.decode(String.self, forKey: .author)
         roles = try c.decode([CursorRole].self, forKey: .roles)
         pointerScale = try c.decodeIfPresent(Double.self, forKey: .pointerScale) ?? 1
+        appearance = try c.decodeIfPresent(CursorAppearance.self, forKey: .appearance) ?? CursorAppearance()
         coverFrame = try c.decodeIfPresent(Data.self, forKey: .coverFrame)
         idleDelay = try c.decode(Double.self, forKey: .idleDelay)
         idleEnabled = try c.decode(Bool.self, forKey: .idleEnabled)
@@ -171,7 +184,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public func validate() throws {
         guard formatVersion == 1, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !roles.isEmpty, roles.count <= 80, Set(roles.map(\.id)).count == roles.count,
-              idleDelay.isFinite, (1...600).contains(idleDelay), pointerScale.isFinite, (0.5...3).contains(pointerScale) else {
+              idleDelay.isFinite, (1...600).contains(idleDelay), pointerScale.isFinite, (0.25...3).contains(pointerScale) else {
             throw ThemeError.invalid("主题格式、角色或待机时间无效。")
         }
         if let coverFrame, coverFrame.isEmpty || coverFrame.count > 8_000_000 { throw ThemeError.invalid("主题封面图像无效或过大。") }
@@ -179,7 +192,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
             if let delay = role.idleDelayOverride, !delay.isFinite || !(1...600).contains(delay) {
                 throw ThemeError.invalid("角色待机等待时间应为 1–600 秒。")
             }
-            guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil, role.scale.isFinite, (0.5...3).contains(role.scale),
+            guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil, role.scale.isFinite, (0.25...3).contains(role.scale),
                   role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }) else {
                 throw ThemeError.invalid("每个光标必须有常态动画及有效的系统标识。")
             }

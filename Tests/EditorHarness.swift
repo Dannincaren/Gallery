@@ -47,7 +47,10 @@ struct EditorHarness {
             reopened.selectTheme(id); try waitFor(reopened)
             try verify(reopened.theme.pointerScale == value, "重新打开主题后大小未独立保存")
         }
-        print("PASS independent theme size, reset, legacy migration and external import")
+        reopened.setThemeScale(0.25); reopened.setRoleScale(0.25); reopened.saveNow(wait: true)
+        let smallest = try ThemeFiles.load(root.appendingPathComponent("Themes/" + reopened.selectedThemeID + ".gallery"))
+        try verify(smallest.pointerScale == 0.25 && smallest.roles[0].scale == 0.25, "25% 大小未独立保存")
+        print("PASS independent theme size, 25% bounds, reset, legacy migration and external import")
     }
     static func checkThemeOrder(at root: URL, role: CursorRole) throws {
         let folder = root.appendingPathComponent("Themes"), index = root.appendingPathComponent("themes.json")

@@ -3,10 +3,11 @@ import Foundation
 /// Read embedded CLI ManifestResource entries without loading or executing PE
 /// code. ECMA-335 II.24/II.22 metadata layout; every range is checked.
 public struct WindowsResources {
+    public static let maximumInstallerBytes = 2_000_000_000
     private let data: Data
     public let entries: [String: Range<Int>]
     public init(data: Data) throws {
-        guard data.count <= 600_000_000 else { throw ThemeError.invalid("安装器超过 600 MB。") }
+        guard data.count <= Self.maximumInstallerBytes else { throw ThemeError.invalid("安装包超过 2 GB。") }
         let r = BinaryReader(data: data)
         guard try r.u16(0) == 0x5a4d else { throw ThemeError.invalid("不是 Windows 安装器。") }
         let pe = try r.u32(0x3c)
@@ -158,7 +159,7 @@ public struct WindowsResources {
             }
             roles.append(CursorRole(id: descriptor.id, name: descriptor.title, clips: clips, variants: variants, selectedVariants: selected))
         }
-        let theme = GalleryTheme(name: "PRTS · Gallery", author: "PRTS 原作者 / 用户本地导入", roles: roles)
+        let theme = GalleryTheme(name: "Windows 光标主题", author: "本地导入", roles: roles)
         try theme.validate(); return theme
     }
     private func resized(_ clip: CursorClip) -> CursorClip {

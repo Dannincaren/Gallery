@@ -33,7 +33,8 @@ public struct CursorFingerprint: Hashable, Sendable {
         for y in 0..<24 { for x in 0..<24 {
             let sx = minX + min(bw - 1, x * bw / 24), sy = minY + min(bh - 1, y * bh / 24)
             let start = (sy * w + sx) * 4
-            sample += rgba[start..<start + 4].map { $0 / 16 }
+            sample.append(rgba[start] / 16); sample.append(rgba[start + 1] / 16)
+            sample.append(rgba[start + 2] / 16); sample.append(rgba[start + 3] / 16)
         } }
         pixels = sample
         aspect = Int((log(Double(bw) / Double(bh)) * 1000).rounded())
@@ -44,6 +45,22 @@ public struct CursorFingerprint: Hashable, Sendable {
         guard abs(aspect - other.aspect) <= 160, abs(hotX - other.hotX) <= 180,
               abs(hotY - other.hotY) <= 180 else { return .infinity }
         return visualDistance(to: other)
+    }
+    /// The same distance threshold, with bounded work for rejected candidates.
+    public func matches(_ other: CursorFingerprint, maximumDistance: Double = 0.012) -> Bool {
+        guard maximumDistance.isFinite, maximumDistance >= 0,
+              abs(aspect - other.aspect) <= 160, abs(hotX - other.hotX) <= 180,
+              abs(hotY - other.hotY) <= 180 else { return false }
+        let denominator = pixels.count * 15
+        // Round outward, then use the original division for the final test;
+        // this also preserves exact decisions on floating-point boundaries.
+        let budget = Int((min(1, maximumDistance) * Double(denominator)).rounded(.up))
+        var error = 0
+        for i in pixels.indices {
+            error += abs(Int(pixels[i]) - Int(other.pixels[i]))
+            if error > budget { return false }
+        }
+        return Double(error) / Double(denominator) <= maximumDistance
     }
     public var geometryDescription: String { "aspect=\(aspect) hotspot=\(hotX),\(hotY)" }
     public func visualDistance(to other: CursorFingerprint) -> Double {
@@ -68,10 +85,10 @@ public struct CursorMatcher: Sendable {
     private var entries: [CursorFingerprint: Entry] = [:]
     private var animatedFrameCounts = Set<Int>()
     public init() {}
-    public mutating func addRepresentations(_ dictionary: [String: Any], role: String) {
+    public mutating func addRepresentations(_ dictionary: [String: Any], role: String, applied: Bool = false) {
         for data in dictionary["Representations"] as? [Data] ?? [] {
             var one = dictionary; one["Representations"] = [data]
-            if let clip = try? CursorImages.fromCape(one) { add(clip, role: role) }
+            if let clip = try? CursorImages.fromCape(one) { add(clip, role: role, applied: applied) }
         }
     }
     public mutating func add(_ clip: CursorClip, role: String, applied: Bool = false) {
@@ -112,12 +129,13 @@ public struct CursorMatcher: Sendable {
     }
     /// Direct bitmap matching keeps PNG conversion entirely out of observation.
     /// Registered animations are vertical filmstrips; validate three frames.
-    public func identify(image: CGImage, width: Double, height: Double, hotX: Double, hotY: Double, frameCount: Int = 1) -> CursorIdentification {
+    public func identify(image: CGImage, width: Double, height: Double, hotX: Double, hotY: Double, frameCount: Int = 1,
+                         sample: CursorFingerprint? = nil) -> CursorIdentification {
         // Global snapshots report physical bitmap dimensions, including 5x /
         // 10x system representations. The theme's 128-point geometry limit
         // must not reject a perfectly valid high-resolution static arrow.
         if frameCount == 1,
-           let sample = CursorFingerprint(image: image, width: width, height: height, hotX: hotX, hotY: hotY) {
+           let sample = sample ?? CursorFingerprint(image: image, width: width, height: height, hotX: hotX, hotY: hotY) {
             let result = identify(sample)
             if !result.roles.isEmpty { return result }
         }

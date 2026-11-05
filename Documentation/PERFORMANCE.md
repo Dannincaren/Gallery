@@ -19,7 +19,7 @@
 
 ## 0.5.2：调整角色交还系统与缩放收尾
 
-2026-10-28，已停止旧 Gallery 实例后在同机 release 测试程序短测：静态约 0.50%（4 秒 21 次 tick），PRTS 文字多帧常态约 3.07%（3 秒）。这不是整机能耗，也不是所有机器或应用的固定上限。不要同时运行旧版或其他光标替换进程进行对比。
+2026-10-28，已停止旧 Gallery 实例后在同机 release 测试程序短测：静态约 0.50%（4 秒 21 次 tick），示例光标主题 文字多帧常态约 3.07%（3 秒）。这不是整机能耗，也不是所有机器或应用的固定上限。不要同时运行旧版或其他光标替换进程进行对比。
 
 已正确注册并选中的调整常态直接由系统播放，运行检查验证进入后无 Gallery 动画帧重复提交。系统注册等时采样上限仍为 24 帧，保持总时长。甩动的变化阶段为 60Hz，放大停留阶段直接等待收尾起点，不持续逐帧唤醒；单次缩放结束后停止调度。
 
@@ -27,9 +27,9 @@
 
 ## 0.5.1：重复帧与事件驱动移动
 
-2026-10-28，在相同本地 release 测试程序与 PRTS 主题下，旧基线文字多帧常态约 4.16% 自进程 CPU；新版本多次短测约 1.8–3.1%，静态约 0.15–0.56%。每次静态采样 4 秒、文字动画 3 秒，仍是短时回归数值，不能等同于整机功耗或普遍上限。
+2026-10-28，在相同本地 release 测试程序与 示例光标主题 主题下，旧基线文字多帧常态约 4.16% 自进程 CPU；新版本多次短测约 1.8–3.1%，静态约 0.15–0.56%。每次静态采样 4 秒、文字动画 3 秒，仍是短时回归数值，不能等同于整机功耗或普遍上限。
 
-PRTS 文字常态 84 帧中只有 44 个连续图像区间。新增预计算表跳过相邻相同图像的提交，并跨循环尾部/头部合并相同停留；原始帧序、停留时长及总周期不变。位图已解码，提交缓存按图像身份复用。
+示例光标主题 文字常态 84 帧中只有 44 个连续图像区间。新增预计算表跳过相邻相同图像的提交，并跨循环尾部/头部合并相同停留；原始帧序、停留时长及总周期不变。位图已解码，提交缓存按图像身份复用。
 
 单纯移动不再触发 120Hz 渲染计时器；事件立即观察变更的角色，原生系统负责位置。缺少事件监听时仍保留输入计数采样。角色独立待机值只覆盖原有状态机的一个截止时间，不新增每角色定时器。
 
@@ -37,12 +37,12 @@ PRTS 文字常态 84 帧中只有 44 个连续图像区间。新增预计算表�
 
 ## 0.5.0：系统光标通道
 
-2026-10-28，本地 macOS 27.2 / Apple Silicon，release 构建，PRTS 主题。旧版覆盖窗口已移除，
+2026-10-28，本地 macOS 27.2 / Apple Silicon，release 构建，示例光标主题 主题。旧版覆盖窗口已移除，
 系统负责鼠标位置，程序只更新缓存图像帧。单帧常态采用系统注册资源或缓存 NSCursor，多帧和交互最多 60 次提交/秒。
 
 `Scripts/runtime-check.sh` 当前使用自己的 AppKit 事件循环和独立恢复记录，不移动鼠标或注入 OS 输入。
 CPU 为 getrusage 的进程用户及系统时间差 / 墙钟时间差；不包含 WindowServer、显示器或整机耗电。
-预热后静态箭头采样 4 秒，PRTS 多帧文字常态采样 3 秒：
+预热后静态箭头采样 4 秒，示例光标主题 多帧文字常态采样 3 秒：
 
 | 场景 | 自进程 CPU | 运行检查次数 |
 |---|---:|---:|
@@ -56,7 +56,7 @@ CPU 为 getrusage 的进程用户及系统时间差 / 墙钟时间差；不包�
 复测：
 
 ```sh
-bash Scripts/runtime-check.sh /tmp/gallery-runtime-new /path/to/PRTS.gallery
+bash Scripts/runtime-check.sh /tmp/gallery-runtime-new /path/to/theme.gallery
 bash Scripts/editor-check.sh /tmp/gallery-editor-new
 ```
 
@@ -69,7 +69,7 @@ bash Scripts/editor-check.sh /tmp/gallery-editor-new
 ## 方式
 
 0.3.0 的运行层与当时的核心/原生桥单独编译，加入相同的基准循环；0.4.0 使用当前运行层。
-均使用同一份 PRTS 主题、独立前台原生 NSCursor 测试窗口，以及后台控制器。
+均使用同一份 示例光标主题 主题、独立前台原生 NSCursor 测试窗口，以及后台控制器。
 启动、主题转换和预热不计入测量；两个控制器均运行同样的 AppKit 事件循环。
 
 - 静止：关闭待机，保持箭头 6 秒。
@@ -96,8 +96,8 @@ bash Scripts/editor-check.sh /tmp/gallery-editor-new
 ## 旧版复测方式（不适用于 0.5.0）
 
 ```sh
-GALLERY_PERF_CHECK=1 GALLERY_FIXTURE_SYSTEM=1 bash Scripts/runtime-check.sh /tmp/gallery-perf /path/to/PRTS.gallery
-GALLERY_DOCK_CHECK=1 GALLERY_FIXTURE_SYSTEM=1 bash Scripts/runtime-check.sh /tmp/gallery-dock /path/to/PRTS.gallery
+GALLERY_PERF_CHECK=1 GALLERY_FIXTURE_SYSTEM=1 bash Scripts/runtime-check.sh /tmp/gallery-perf /path/to/theme.gallery
+GALLERY_DOCK_CHECK=1 GALLERY_FIXTURE_SYSTEM=1 bash Scripts/runtime-check.sh /tmp/gallery-dock /path/to/theme.gallery
 bash Scripts/editor-check.sh /tmp/gallery-editor-new-directory
 ```
 

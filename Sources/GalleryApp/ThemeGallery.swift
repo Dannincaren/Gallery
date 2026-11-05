@@ -1,5 +1,4 @@
 import SwiftUI
-import CoreText
 import GalleryCore
 
 /// The gallery only displays cached stills. No frame clocks or animation
@@ -7,6 +6,7 @@ import GalleryCore
 struct ThemeGallery<Actions: View>: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
+    @Binding var selection: String?
     let open: (String) -> Void
     let importTheme: () -> Void
     @ViewBuilder var actions: (LibraryTheme) -> Actions
@@ -77,10 +77,10 @@ struct ThemeGallery<Actions: View>: View {
             }.padding(.horizontal, 38).padding(.top, 28).padding(.bottom, 36)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onChange(of: query) { _, _ in reordering = false; clearDrag() }
+        .onChange(of: query) { _, _ in reordering = false; clearDrag(); store.cancelThemePreparation() }
         .onChange(of: store.importing) { _, importing in if importing { reordering = false; clearDrag() } }
         .onExitCommand { clearDrag() }
-        .onDisappear { clearDrag() }
+        .onDisappear { clearDrag(); store.cancelThemePreparation() }
     }
     private func clearDrag() {
         dragEndTimer?.invalidate(); dragEndTimer = nil; dragSessionID = nil
@@ -108,22 +108,14 @@ struct ThemeGallery<Actions: View>: View {
         timer.tolerance = 0.01; dragEndTimer = timer; RunLoop.main.add(timer, forMode: .common)
     }
     private func showcase(_ theme: LibraryTheme) -> some View {
-        let position = store.library.firstIndex { $0.id == theme.id } ?? 0
-        return ThemeShowcaseCard(theme: theme, active: store.isActiveTheme(theme.id), reordering: reordering,
+        return ThemeShowcaseCard(theme: theme, active: store.isActiveTheme(theme.id), selected: selection == theme.id, reordering: reordering,
             placeholder: draggingID == theme.id,
-            open: { if !reordering { open(theme.id) } }) {
+            open: {
+                guard !reordering, !store.importing else { return }
+                if store.isActiveTheme(theme.id) || selection == theme.id { open(theme.id) }
+                else { selection = theme.id; store.prepareTheme(theme.id) }
+            }) {
                 actions(theme)
-                Divider()
-                Menu("调整顺序") {
-                    Button("移到最前", systemImage: "arrow.up.to.line") { store.moveTheme(theme.id, to: 0) }
-                        .disabled(position == 0 || store.importing)
-                    Button("向前移动", systemImage: "arrow.up") { store.moveTheme(theme.id, to: position - 1) }
-                        .disabled(position == 0 || store.importing)
-                    Button("向后移动", systemImage: "arrow.down") { store.moveTheme(theme.id, to: position + 1) }
-                        .disabled(position == store.library.count - 1 || store.importing)
-                    Button("移到最后", systemImage: "arrow.down.to.line") { store.moveTheme(theme.id, to: store.library.count - 1) }
-                        .disabled(position == store.library.count - 1 || store.importing)
-                }
             }.modifier(ThemeOrderSource(enabled: reordering && !store.importing && query.isEmpty, theme: theme, began: beginDrag))
                 .onDrop(of: [.galleryThemeOrder], delegate: ThemeOrderDropDelegate(targetID: theme.id,
                     enabled: reordering && !store.importing && query.isEmpty, store: store, draggingID: $draggingID, order: $dragOrder,
@@ -141,67 +133,137 @@ struct ThemeGallery<Actions: View>: View {
                 .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain).aspectRatio(1, contentMode: .fit)
             .background(RoundedRectangle(cornerRadius: 20).strokeBorder(.secondary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5, 5])))
-            .accessibilityIdentifier("import-theme-card")
+            .padding(EdgeInsets(top: 6, leading: 4, bottom: 26, trailing: 28)).aspectRatio(1, contentMode: .fit)
+            .accessibilityIdentifier("import-theme-card").disabled(store.importing)
     }
 }
 
-private struct ThemeShowcaseCard<Actions: View>: View {
+struct ThemeShowcaseCard<Actions: View>: View {
     let theme: LibraryTheme
     let active: Bool
+    var selected = false
     var reordering = false
     var placeholder = false
     let open: () -> Void
     @ViewBuilder var actions: () -> Actions
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
+    @State private var showActiveLabel = false
+    @State private var presentedElevation: Int?
+    @State private var presentationGeneration = UUID()
+    private var elevationDuration: Double { reduceMotion ? 0.12 : 0.2 }
+    private var labelFadeOutDuration: Double { reduceMotion ? 0.08 : 0.16 }
+    private var elevation: Int { active ? 2 : selected ? 1 : 0 }
+    private var visibleElevation: Int { presentedElevation ?? elevation }
+    private var lift: CGSize { CGSize(width: visibleElevation == 2 ? -1 : 0, height: visibleElevation == 2 ? -3 : visibleElevation == 1 ? -2 : 0) }
+    private var depth: CGSize { CGSize(width: visibleElevation == 2 ? 22 : visibleElevation == 1 ? 6 : 0, height: visibleElevation == 2 ? 12 : visibleElevation == 1 ? 6 : 0) }
+    private var backing: Color {
+        visibleElevation == 2 ? Color(white: colorScheme == .dark ? 0.44 : 0.43)
+            : Color(white: colorScheme == .dark ? 0.38 : 0.82)
+    }
     private var arrow: Data? {
         theme.cover ?? theme.roles.first(where: { CursorCatalog.isArrow($0.id) })?.thumbnail
     }
     var body: some View {
         Button(action: open) {
-            VStack(alignment: .leading, spacing: 0) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13)
-                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.025))
-                    if let arrow, let image = EditorImageCache.image(arrow) {
-                        Image(nsImage: image).resizable().interpolation(.none).scaledToFit()
-                            .frame(width: 88, height: 88).shadow(color: .black.opacity(0.09), radius: 4, y: 4)
-                    } else {
-                        Image(systemName: "cursorarrow").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(.tertiary)
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    // The opaque face conceals the backing at rest. Reveal it
+                    // through movement, rather than also fading a tiny edge
+                    // from transparent (which only becomes visible at the end).
+                    .fill(backing)
+                    .offset(x: depth.width, y: depth.height)
+                    .shadow(color: .black.opacity(visibleElevation == 2 ? 0.14 : visibleElevation == 1 ? 0.08 : 0),
+                        radius: visibleElevation == 2 ? 8 : 4, x: visibleElevation == 2 ? 3 : 1, y: visibleElevation == 2 ? 5 : 2)
+                face.offset(lift)
+            }
+            .overlay(alignment: .topTrailing) {
+                VStack(spacing: 3) {
+                    ForEach(Array("正在使用"), id: \.self) { character in
+                        Text(String(character))
                     }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(theme.name).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                    Text("\(theme.roles.count) 个角色").font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.top, 14).padding(.trailing, 34)
-            }.padding(17).frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(RoundedRectangle(cornerRadius: 20))
-        }.buttonStyle(.plain).aspectRatio(1, contentMode: .fit)
-            .accessibilityLabel("\(reordering ? "移动主题" : "打开主题")：\(theme.name)")
-            .accessibilityIdentifier("theme-card-\(theme.id)")
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 20))
-            .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(active ? Color.accentColor.opacity(0.7) : Color.primary.opacity(hovering ? 0.22 : 0.07), lineWidth: active ? 1.5 : 1) }
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.09 : 0.035), radius: 10, y: 5)
-            .overlay(alignment: .topLeading) {
-                if active {
-                    Label("正在使用", systemImage: "checkmark.circle.fill").font(.caption2.weight(.medium))
-                        .foregroundStyle(.green).padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(.regularMaterial, in: Capsule()).padding(11)
                 }
+                .font(GalleryStatusTypography.italic)
+                .foregroundStyle(Color(red: 1, green: 0.98, blue: 0.92))
+                .shadow(color: Color.white.opacity(0.72), radius: 1.2)
+                .shadow(color: Color(red: 1, green: 0.97, blue: 0.87).opacity(0.48), radius: 3)
+                .frame(width: 22).padding(.top, 27)
+                .offset(x: 22, y: 12).opacity(active && showActiveLabel ? 1 : 0)
+                .animation(active ? .easeOut(duration: 0.14) : .easeInOut(duration: labelFadeOutDuration), value: active && showActiveLabel)
+                .allowsHitTesting(false).accessibilityHidden(true)
             }
-            .overlay(alignment: .bottomTrailing) {
-                Menu { actions() } label: {
-                    Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
-                        .frame(width: 29, height: 29).background(.regularMaterial, in: Circle())
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().padding(.trailing, 15).padding(.bottom, 18)
-                    .help("\(theme.name)的主题操作")
-                    .accessibilityLabel("\(theme.name)的主题操作")
-                    .accessibilityIdentifier("theme-menu-\(theme.id)")
+            // The face, depth and label all stay inside this fixed grid cell.
+            // Every face keeps the same square size in all three states.
+            .padding(EdgeInsets(top: 6, leading: 4, bottom: 26, trailing: 28))
+            .aspectRatio(1, contentMode: .fit).contentShape(Rectangle())
+        }
+        .buttonStyle(ShowcaseCardButtonStyle())
+        .accessibilityLabel("\(reordering ? "移动主题" : (active || selected ? "打开主题" : "选择主题"))：\(theme.name)")
+        .accessibilityValue(active ? "正在使用" : selected ? "已选中" : "未选中")
+        .accessibilityIdentifier("theme-card-\(theme.id)")
+        .overlay(alignment: .bottomTrailing) {
+            Menu { actions() } label: {
+                Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
+                    .frame(width: 29, height: 29).background(.regularMaterial, in: Circle())
             }
-            .opacity(placeholder ? 0.28 : 1)
-            .onHover { hovering = $0 }
-            .contextMenu { actions() }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .padding(.trailing, 43).padding(.bottom, 44).offset(lift)
+            .help("\(theme.name)的主题操作").accessibilityLabel("\(theme.name)的主题操作")
+            .accessibilityIdentifier("theme-menu-\(theme.id)")
+        }
+        .opacity(placeholder ? 0.28 : 1)
+        .onHover { hovering = $0 }
+        .contextMenu { actions() }
+        .onAppear { presentedElevation = elevation; showActiveLabel = active }
+        .onDisappear { presentationGeneration = UUID() }
+        .onChange(of: elevation) { previous, next in
+            // Let the label fade finish before retracting its backing.
+            // Hover styling has its own local animation, so entering the card
+            // while clicking cannot shorten this transition.
+            let delay = previous == 2 && next != 2 ? labelFadeOutDuration + 0.02 : 0
+            let generation = UUID(); presentationGeneration = generation
+            showActiveLabel = false
+            withAnimation(.easeInOut(duration: elevationDuration).delay(delay), completionCriteria: .logicallyComplete) {
+                presentedElevation = next
+            } completion: {
+                guard presentationGeneration == generation, next == 2 else { return }
+                showActiveLabel = true
+            }
+        }
     }
+    private var face: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.025))
+                if let arrow, let image = EditorImageCache.image(arrow) {
+                    Image(nsImage: image).resizable().interpolation(theme.appearance?.smoothEdges == false ? .none : .high).scaledToFit()
+                        .frame(width: 80, height: 80).shadow(color: .black.opacity(0.09), radius: 4, y: 4)
+                } else {
+                    Image(systemName: "cursorarrow").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(.tertiary)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(theme.name).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                Text("\(theme.roles.count) 个角色").font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.top, 14).padding(.trailing, 34)
+        }
+        .padding(17).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20).strokeBorder(Color.primary.opacity(hovering ? 0.16 : 0.07), lineWidth: 1)
+                .animation(.easeOut(duration: 0.14), value: hovering)
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.08 : 0.025), radius: 3, y: 1)
+    }
+}
+
+// Keep the opaque card face during a short navigation load. The loading
+// overlay already communicates that controls are temporarily unavailable.
+private struct ShowcaseCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
 struct ThemeRenameSheet: View {
@@ -250,19 +312,4 @@ struct ThemeDeleteSheet: View {
             }
         }.padding(28).frame(width: 420)
     }
-}
-
-/// Registered once for this process; the font is never installed system-wide.
-private enum GalleryWordmark {
-    static let font: Font = {
-        let name = "UnifrakturMaguntia-Book"
-        let bundled = Bundle.main.url(forResource: name, withExtension: "ttf", subdirectory: "Fonts")
-        // swift run and UI harnesses have no .app resource directory.
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Resources/Fonts/\(name).ttf")
-        if let url = bundled ?? (FileManager.default.fileExists(atPath: source.path) ? source : nil) {
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
-        return .custom("UnifrakturMaguntia", size: 43.6034597472)
-    }()
 }

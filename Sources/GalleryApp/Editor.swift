@@ -1,19 +1,37 @@
 import SwiftUI
 import GalleryCore
 
+private struct ThemeToolbarSurface: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: Capsule())
+        } else {
+            content.background(.regularMaterial, in: Capsule())
+                .overlay { Capsule().strokeBorder(.primary.opacity(0.08), lineWidth: 0.5) }
+        }
+    }
+}
+
 struct GalleryEditor: View {
     @ObservedObject var store: GalleryStore
     @ObservedObject var runtime: CursorRuntime
     @ObservedObject var preferences: AppPreferences
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var playing = true
     @State private var selectedFrame = 0
     @State private var previewStart = Date()
     @State private var showSettings = false
+    @State private var adjustingSize = false
     @State private var showImport = false
     @State private var showRoleSource = false
     @State private var themeToDelete: LibraryTheme?
     @State private var showingTheme = false
+    @State private var selectedGalleryThemeID: String?
+    @State private var showLoadingProgress = false
+    @State private var extraStartSlotExpanded = false
+    @State private var extraStartIconVisible = false
+    @State private var toolbarPresentationGeneration = UUID()
     @State private var openingThemeID: String?
     @State private var deletingThemeID: String?
     @State private var themeToRename: LibraryTheme?
@@ -28,7 +46,7 @@ struct GalleryEditor: View {
             if showingTheme {
                 NavigationSplitView { sidebar } detail: { editorDetail }
             } else {
-                ThemeGallery(store: store, runtime: runtime, open: openTheme, importTheme: { showImport = true }) { folder in
+                ThemeGallery(store: store, runtime: runtime, selection: $selectedGalleryThemeID, open: openTheme, importTheme: { showImport = true }) { folder in
                     themeActions(folder)
                 }
             }
@@ -39,11 +57,13 @@ struct GalleryEditor: View {
                 deletingThemeID = folder.id; store.deleteTheme(folder.id); themeToDelete = nil
             }
         }
-        .disabled(store.importing)
+        .disabled(store.importing && showingTheme)
+        .allowsHitTesting(!store.importing)
         .sheet(isPresented: $showSettings) { InteractionSettings(store: store, runtime: runtime) }
         .sheet(isPresented: $showImport) { ImportThemePanel(store: store) }
+        .sheet(item: $store.importReview, onDismiss: { store.cancelImportReview() }) { review in ImportReviewSheet(store: store, review: review) }
         .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first else { return false }
+            guard !store.importing, let url = urls.first else { return false }
             store.importURL(url); return true
         }
         .alert("Gallery", isPresented: Binding(get: { store.message != nil || runtime.error != nil }, set: { if !$0 { store.message = nil; runtime.error = nil } })) {
@@ -54,8 +74,12 @@ struct GalleryEditor: View {
         .onAppear { editorActive = NSApp.isActive }
         .background(EditorVisibilityReader(visible: $editorVisible).frame(width: 0, height: 0))
         .onChange(of: store.selectedThemeID) { _, id in
+            selectedGalleryThemeID = id
             if openingThemeID == id { showingTheme = true; openingThemeID = nil }
             selectedFrame = 0; previewStart = Date()
+        }
+        .onChange(of: store.library.map(\.id)) { _, ids in
+            if let selectedGalleryThemeID, !ids.contains(selectedGalleryThemeID) { self.selectedGalleryThemeID = nil }
         }
         .onChange(of: store.importing) { _, busy in
             guard !busy else { return }
@@ -72,13 +96,22 @@ struct GalleryEditor: View {
         .sheet(item: $themeToRename) { folder in
             ThemeRenameSheet(theme: folder) { store.renameTheme(folder.id, to: $0) }
         }
-        .overlay {
-            if store.importing {
-                ZStack {
-                    Color.black.opacity(0.05).ignoresSafeArea()
-                    HStack(spacing: 12) { ProgressView().controlSize(.small); Text(openingThemeID == nil ? "正在处理主题…" : "正在打开主题…") }
-                        .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .task(id: store.importing) {
+            showLoadingProgress = false
+            guard store.importing else { return }
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            guard !Task.isCancelled, store.importing else { return }
+            showLoadingProgress = true
+        }
+        .overlay(alignment: .topTrailing) {
+            if store.importing && showLoadingProgress {
+                HStack(spacing: 9) {
+                    ProgressView().controlSize(.small)
+                    Text(openingThemeID == nil ? "正在处理主题…" : "正在打开主题…").font(.callout)
                 }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .padding(16).allowsHitTesting(false)
             }
         }
         .sheet(isPresented: $showRoleSource) { RoleSourcePicker(store: store) }
@@ -96,13 +129,13 @@ struct GalleryEditor: View {
                             Text("直接调整热点与动画，自动保存到当前主题。").foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if runtime.enabled { Button("暂停并编辑") { runtime.stop() } }
+                        if store.editingActiveTheme { Button("暂停并编辑") { runtime.stop() } }
 
                     }
                     HStack(spacing: 12) {
                         NumericSlider(title: "主题整体大小", value: Binding(get: { store.theme.pointerScale }, set: {
                             store.setThemeScale($0)
-                        }), range: 50...300, unit: "%", multiplier: 100)
+                        }), range: 25...300, unit: "%", multiplier: 100, onTrackingChanged: { adjustingSize = $0 })
                         Button("还原") { store.setThemeScale(1) }
                         Text("仅影响当前主题").font(.caption).foregroundStyle(.secondary)
                     }
@@ -131,7 +164,7 @@ struct GalleryEditor: View {
                         } actions: {
                             Button("从常态复制") { store.createClip() }
                             Button("导入动画") { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
-                        }.frame(minHeight: 360).disabled(runtime.enabled)
+                        }.frame(minHeight: 360).disabled(store.editingActiveTheme)
                     }
                 }.padding(28)
             }
@@ -143,46 +176,118 @@ struct GalleryEditor: View {
             }.padding(.horizontal, 22).padding(.vertical, 12).background(.bar)
         }
     }
+    private var themeControlID: String? {
+        let id = showingTheme ? store.selectedThemeID : selectedGalleryThemeID
+        return id.flatMap { candidate in store.library.contains(where: { $0.id == candidate }) ? candidate : nil }
+    }
+    private var showsAdditionalStartControl: Bool {
+        runtime.enabled && themeControlID.map { !store.isActiveTheme($0) } == true
+    }
     @ToolbarContentBuilder private var themeToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             if showingTheme {
                 Button(action: showGallery) { Label("主题橱窗", systemImage: "chevron.left") }.help("返回主题橱窗")
             }
         }
-        ToolbarItemGroup {
-            if showingTheme && !store.isActiveTheme(store.selectedThemeID) {
-                Button { store.applyCurrentTheme() } label: { Label("使用此主题", systemImage: "play.circle") }.tint(.blue)
-            }
-            if runtime.enabled {
-                Button { runtime.stop() } label: { Label("停用并恢复", systemImage: "pause.circle") }
-            }
-            Button { showImport = true } label: { Label("导入主题", systemImage: "plus") }
-            Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
+        if #available(macOS 26.0, *) {
+            ToolbarItem(id: "gallery-theme-controls") { themeToolbarCapsule }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(id: "gallery-theme-controls") { themeToolbarCapsule }
         }
+    }
+    private var themeToolbarCapsule: some View {
+        HStack(spacing: 0) {
+            // Keep one native toolbar item at its maximum width. Only this
+            // internal slot changes width, so AppKit never relays out the
+            // title-bar capsule or shifts its right-hand controls.
+            Button(action: startSelectedTheme) { Label("使用选中主题", systemImage: "play.circle") }
+                .frame(width: 34, height: 30)
+                .disabled(store.importing || themeControlID == nil || !showsAdditionalStartControl)
+                .help("开始使用选中的主题")
+                .accessibilityIdentifier("start-selected-theme")
+                .frame(width: extraStartSlotExpanded ? 34 : 0, alignment: .trailing)
+                .clipped().opacity(extraStartIconVisible ? 1 : 0)
+                .allowsHitTesting(showsAdditionalStartControl && extraStartIconVisible)
+                .accessibilityHidden(!showsAdditionalStartControl || !extraStartIconVisible)
+            Button {
+                if runtime.enabled {
+                    if !showingTheme && selectedGalleryThemeID == nil { selectedGalleryThemeID = store.activeThemeID }
+                    runtime.stop()
+                } else { startSelectedTheme() }
+            } label: {
+                Label(runtime.enabled ? "停用并恢复" : (showingTheme ? "使用此主题" : "使用选中主题"),
+                    systemImage: runtime.enabled ? "pause.circle" : "play.circle")
+            }
+                .frame(width: 34, height: 30)
+                .disabled(store.importing || (!runtime.enabled && themeControlID == nil))
+                .help(runtime.enabled ? "停用并恢复光标" : (themeControlID == nil ? "先选择一张主题卡片" : "开始使用选中的主题"))
+                .accessibilityIdentifier(runtime.enabled ? "stop-gallery-theme" : "start-selected-theme")
+            Button { showImport = true } label: { Label("导入主题", systemImage: "plus") }
+                .frame(width: 34, height: 30).disabled(store.importing).help("导入主题")
+            Button { showSettings = true } label: { Label("交互与应用设置", systemImage: "slider.horizontal.3") }
+                .frame(width: 34, height: 30).disabled(store.importing).help("交互与应用设置")
+        }
+        .labelStyle(.iconOnly).font(.system(size: 18)).buttonStyle(.plain)
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .modifier(ThemeToolbarSurface())
+        .frame(width: 148, height: 38, alignment: .trailing)
+        .onAppear {
+            extraStartSlotExpanded = showsAdditionalStartControl
+            extraStartIconVisible = showsAdditionalStartControl
+        }
+        .onDisappear { toolbarPresentationGeneration = UUID() }
+        .onChange(of: showsAdditionalStartControl) { _, expanded in updateToolbarExpansion(expanded) }
+    }
+    private func updateToolbarExpansion(_ expanded: Bool) {
+        let generation = UUID(); toolbarPresentationGeneration = generation
+        let resize = Animation.easeInOut(duration: reduceMotion ? 0.12 : 0.2)
+        let fade = Animation.easeOut(duration: reduceMotion ? 0.06 : 0.1)
+        if expanded {
+            withAnimation(resize, completionCriteria: .logicallyComplete) {
+                extraStartSlotExpanded = true
+            } completion: {
+                guard toolbarPresentationGeneration == generation else { return }
+                withAnimation(fade) { extraStartIconVisible = true }
+            }
+        } else {
+            // Never clip a visible symbol against a moving capsule edge.
+            withAnimation(fade, completionCriteria: .logicallyComplete) {
+                extraStartIconVisible = false
+            } completion: {
+                guard toolbarPresentationGeneration == generation else { return }
+                withAnimation(resize) { extraStartSlotExpanded = false }
+            }
+        }
+    }
+    private func startSelectedTheme() {
+        if let id = themeControlID { store.selectTheme(id, activate: true) }
     }
     private func openTheme(_ id: String) {
         guard !store.importing else { return }
+        selectedGalleryThemeID = id
         playing = true; previewStart = Date(); openingThemeID = id
         store.selectTheme(id)
         if store.selectedThemeID == id { showingTheme = true; openingThemeID = nil }
     }
     private func showGallery() {
         playing = false; showingTheme = false; openingThemeID = nil
-        store.saveNow()
+        selectedGalleryThemeID = store.selectedThemeID
+        store.saveIfNeeded()
     }
     @ViewBuilder private func themeActions(_ folder: LibraryTheme) -> some View {
-        Button("打开主题") { openTheme(folder.id) }
+        Button("打开主题") { openTheme(folder.id) }.disabled(store.importing)
         if store.isActiveTheme(folder.id) {
-            Button("停用并恢复光标") { runtime.stop() }
+            Button("停用并恢复光标") { runtime.stop() }.disabled(store.importing)
         } else {
-            Button("使用此主题") { store.selectTheme(folder.id, activate: true) }
+            Button("使用此主题") { store.selectTheme(folder.id, activate: true) }.disabled(store.importing)
         }
         Divider()
-        Button("重命名…") { themeToRename = folder }
-        Button("导出 Gallery 主题…") { store.exportTheme(folder.id) }
-        Button("导出常态 Mousecape 主题…") { store.exportTheme(folder.id, cape: true) }
+        Button("重命名…") { themeToRename = folder }.disabled(store.importing)
+        Button("导出 Gallery 主题…") { store.exportTheme(folder.id) }.disabled(store.importing)
+        Button("导出常态 Mousecape 主题…") { store.exportTheme(folder.id, cape: true) }.disabled(store.importing)
         Divider()
-        Button("删除整个主题…", role: .destructive) { themeToDelete = folder }
+        Button("删除整个主题…", role: .destructive) { themeToDelete = folder }.disabled(store.importing)
     }
     private func deletionMessage(_ folder: LibraryTheme) -> String {
         var text = "将删除「\(folder.name)」的全部角色与动画。"
@@ -194,7 +299,7 @@ struct GalleryEditor: View {
     private var sidebarText: Color { colorScheme == .dark ? .white : .black }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Gallery").font(.title2.weight(.semibold)).padding(.top, 20).padding(.horizontal, 18)
+            SidebarGalleryWordmark().padding(.top, 16).padding(.horizontal, 18)
             HStack(alignment: .top, spacing: 12) {
                 if let data = store.library.first(where: { $0.id == store.selectedThemeID })?.cover, let image = EditorImageCache.image(data) {
                     Image(nsImage: image).resizable().interpolation(.none).scaledToFit().frame(width: 36, height: 36)
@@ -254,9 +359,9 @@ struct GalleryEditor: View {
                 }.pickerStyle(.segmented).frame(width: 220)
             }
             if role.idleDelayOverride != nil {
-                NumericSlider(title: "静止后播放", value: Binding(get: { role.idleDelayOverride ?? store.theme.idleDelay }, set: {
+                NumericSlider(title: "静止后播放", value: Binding(get: { store.theme.roles.first { $0.id == role.id }?.idleDelay(default: store.theme.idleDelay) ?? store.theme.idleDelay }, set: {
                     store.setRoleIdleDelay($0, for: role.id)
-                }), range: 1...60, unit: "秒", inputRange: 1...600).id(role.id + ":idle")
+                }), range: 1...60, unit: "秒", inputRange: 1...600, updatesWhileDragging: false).id(role.id + ":idle")
                 Text("拖动调整 1–60 秒，也可直接输入至 600 秒。").font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("使用全局默认：\(Int(store.theme.idleDelay)) 秒。仅此角色可单独覆盖。").font(.callout).foregroundStyle(.secondary)
@@ -274,11 +379,11 @@ struct GalleryEditor: View {
                     if role.selectedVariants[store.selectedMotion.rawValue] == nil { Text("当前素材").tag("") }
                     ForEach(variants) { variant in Text(variant.name).tag(variant.id) }
                 }.frame(maxWidth: 440)
-                if let clip = store.clip { Text(clip.frames.count > 1 ? "\(clip.frames.count) 帧" : "单帧").font(.caption).foregroundStyle(.secondary) }
+                if let clip = store.clip { Text(clip.frames.count > 1 ? "动态 · \(clip.frames.count) 帧" : "静态 · 单帧").font(.caption).foregroundStyle(.secondary) }
             } else { Text("素材版本").font(.callout).foregroundStyle(.secondary) }
             Spacer(minLength: 0)
             Button("添加其他版本…") { store.importVariant() }
-        }.disabled(runtime.enabled)
+        }.disabled(store.editingActiveTheme)
     }
     private var statusBar: some View {
         HStack(spacing: 9) {
@@ -298,11 +403,11 @@ struct GalleryEditor: View {
     @ViewBuilder private func clipEditor(_ clip: CursorClip) -> some View {
         HStack(alignment: .top, spacing: 24) {
             VStack(spacing: 12) {
-                TimelineView(.animation(minimumInterval: max(1.0 / 60, clip.frameDuration), paused: !playing || clip.frames.count < 2 || !editorActive || !editorVisible || runtime.enabled)) { context in
+                TimelineView(.animation(minimumInterval: max(1.0 / 60, clip.frameDuration), paused: !playing || clip.frames.count < 2 || !editorActive || !editorVisible || store.editingActiveTheme || adjustingSize || showSettings || showImport || store.importReview != nil || showRoleSource || themeToRename != nil || themeToDelete != nil)) { context in
                     let elapsed = max(0, context.date.timeIntervalSince(previewStart))
                     let n = playing ? Int(elapsed / clip.frameDuration) : selectedFrame
                     let index = playing && !store.selectedMotion.loops ? min(n, clip.frames.count - 1) : n % clip.frames.count
-                    HotspotPreview(clip: clip, frame: max(0, min(index, clip.frames.count - 1)), editable: !runtime.enabled) { x, y in
+                    HotspotPreview(clip: clip, frame: max(0, min(index, clip.frames.count - 1)), appearance: store.theme.appearance, editable: !store.editingActiveTheme) { x, y in
                         store.edit { $0.hotX = x; $0.hotY = y }
                     }
                     .onChange(of: !store.selectedMotion.loops && elapsed >= clip.duration) { _, finished in
@@ -311,11 +416,11 @@ struct GalleryEditor: View {
                 }.frame(minWidth: 320, minHeight: 300).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
                 HStack {
                     Button { playing.toggle(); previewStart = Date() } label: {
-                        Label(runtime.enabled ? "预览已暂停" : (clip.frames.count < 2 ? "静态预览" : (playing ? "暂停预览" : "播放预览")), systemImage: playing ? "pause.fill" : "play.fill")
-                    }.disabled(runtime.enabled || clip.frames.count < 2)
-                        .help(runtime.enabled ? "先暂停自定义主题，再播放编辑器预览。" : "播放或暂停预览")
+                        Label(store.editingActiveTheme ? "预览已暂停" : (clip.frames.count < 2 ? "静态预览" : (playing ? "暂停预览" : "播放预览")), systemImage: playing ? "pause.fill" : "play.fill")
+                    }.disabled(store.editingActiveTheme || clip.frames.count < 2)
+                        .help(store.editingActiveTheme ? "先暂停此主题，再播放编辑器预览。" : "播放或暂停预览")
                     Button { previewStart = Date(); playing = true } label: { Image(systemName: "backward.end.fill") }
-                        .help("重新播放").disabled(runtime.enabled || clip.frames.count < 2)
+                        .help("重新播放").disabled(store.editingActiveTheme || clip.frames.count < 2)
                     Spacer()
                     Text("\(clip.frames.count) 帧 · \(clip.duration, specifier: "%.2f") 秒").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
@@ -336,7 +441,7 @@ struct GalleryEditor: View {
                 if clip.frames.count > 24 {
                     Label("Gallery 保留完整帧；导出 Mousecape 时采样为 24 帧。", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
                 }
-            }.frame(width: 210).disabled(runtime.enabled)
+            }.frame(width: 210).disabled(store.editingActiveTheme)
         }
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -345,7 +450,7 @@ struct GalleryEditor: View {
                 Button("替换动画…") { store.importFrames(append: false); selectedFrame = 0 }
                 Button("追加帧…") { store.importFrames(append: true) }
                 if store.selectedMotion != .normal { Button("移除此状态", role: .destructive) { store.removeClip() } }
-            }.disabled(runtime.enabled)
+            }.disabled(store.editingActiveTheme)
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 9) {
                     ForEach(Array(clip.frames.enumerated()), id: \.offset) { index, data in
@@ -356,7 +461,7 @@ struct GalleryEditor: View {
                             }.padding(8).background(selectedFrame == index ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(selectedFrame == index ? Color.accentColor : .clear))
                         }.buttonStyle(.plain).contextMenu {
-                            Button("复制当前帧") { selectedFrame = index; duplicateFrame(index) }.disabled(runtime.enabled)
+                            Button("复制当前帧") { selectedFrame = index; duplicateFrame(index) }.disabled(store.editingActiveTheme)
                             Button("设为主题封面") { selectedFrame = index; playing = false; store.setThemeCover(at: index) }
                         }
                     }
@@ -373,7 +478,7 @@ struct GalleryEditor: View {
                 }.disabled(clip.frames.count <= 1)
                 Spacer()
                 Text("支持 PNG 序列、GIF、Windows CUR / ANI").font(.caption).foregroundStyle(.secondary)
-            }.disabled(runtime.enabled)
+            }.disabled(store.editingActiveTheme)
             HStack {
                 let current = max(0, min(selectedFrame, clip.frames.count - 1))
                 Button {
@@ -392,19 +497,24 @@ struct GalleryEditor: View {
     }
     private func roleControls(_ role: CursorRole) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                NumericSlider(title: "此角色大小", value: Binding(get: { role.scale }, set: { store.setRoleScale($0, for: role.id) }),
-                              range: 50...300, unit: "%", multiplier: 100).disabled(role.usesNative).id(role.id + ":size")
-                Button("还原") { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
-                Text("叠加在主题整体大小之上").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        NumericSlider(title: "此角色大小", value: Binding(get: { store.theme.roles.first { $0.id == role.id }?.scale ?? role.scale }, set: { store.setRoleScale($0, for: role.id) }),
+                                      range: 25...300, unit: "%", multiplier: 100, onTrackingChanged: { adjustingSize = $0 }).disabled(role.usesNative).id(store.selectedThemeID + role.id + ":size")
+                        Button("还原") { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
+                    }
+                    Text("叠加主题整体大小；右侧按实际大小静态预览。").font(.caption).foregroundStyle(.secondary)
+                }
+                RoleSizePreview(clip: role.clip(.normal), scale: store.theme.pointerScale * role.scale, appearance: store.theme.appearance)
             }
             HStack {
                 Toggle("使用系统原有光标", isOn: Binding(get: { role.usesNative }, set: { store.setUsesNative($0) }))
                 Spacer()
                 if let name = role.sourceThemeName { Text("素材来自：\(name)").font(.caption).foregroundStyle(.secondary) }
                 Button("从其他主题选取…") { showRoleSource = true }
-            }.disabled(runtime.enabled)
-            if runtime.enabled { Text("暂停后可更换角色来源；大小可以直接调节。").font(.caption).foregroundStyle(.secondary) }
+            }.disabled(store.editingActiveTheme)
+            if store.editingActiveTheme { Text("暂停此主题后可更换角色来源；大小可以直接调节。").font(.caption).foregroundStyle(.secondary) }
         }
     }
     private func moveFrame(_ offset: Int) {
@@ -442,12 +552,19 @@ private struct ImportThemePanel: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Windows 光标安装包", systemImage: "shippingbox").font(.headline)
-                    Text("选择内嵌 CUR／ANI 的 .NET EXE（支持 PRTS、mon3tr 这类安装器），或选择包含光标和安装 INF 的文件夹、ZIP。也可直接选 INF。Gallery 直接读取素材，不运行安装程序。")
+                    Text("选择内嵌光标的 .NET、.NET 单文件或 Inno Setup EXE，也可导入 CUR／ANI 文件、光标文件夹、ZIP 或安装 INF。Gallery 仅读取素材，不运行 Windows 程序。")
                         .font(.callout).foregroundStyle(.secondary)
                     Text("静态、动态等可选版本会一并保留。旧版主题需重新导入原包，或在角色页「添加其他版本」。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("不同 EXE 的打包方式可能不同，无法直接解析时请使用光标 ZIP。PRTS 请选 PRTS-Setup.exe，避免只选安装入口。")
+                    Text("请选择实际包含素材的安装包。快捷安装入口、加密包或其他封装无法读取时，请改用解压后的 CUR／ANI 文件夹。")
                         .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("导入之后", systemImage: "cursorarrow.click").font(.headline)
+                    Text("① 单击卡片选中主题，点右上角开始使用。② 再点已选中的卡片打开编辑，可调整大小、热点和各阶段动画。③ 点停止即可恢复系统光标；关闭窗口后仍可从菜单栏控制。")
+                        .font(.callout).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
             }
             HStack {
@@ -465,6 +582,7 @@ private struct ImportThemePanel: View {
 private struct HotspotPreview: View {
     let clip: CursorClip
     let frame: Int
+    let appearance: CursorAppearance
     let editable: Bool
     let set: (Double, Double) -> Void
     var body: some View {
@@ -482,7 +600,9 @@ private struct HotspotPreview: View {
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 18))
                 if let image = EditorImageCache.image(clip.frames[frame]) {
-                    Image(nsImage: image).resizable().interpolation(.high).frame(width: width, height: height).position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    Image(nsImage: image).resizable().interpolation(appearance.smoothEdges ? .high : .none)
+                        .shadow(color: .black.opacity(appearance.shadow ? 0.32 : 0), radius: 1.5 * scale, x: 0, y: scale)
+                        .frame(width: width, height: height).position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                 }
                 Path { p in
                     let x = origin.x + clip.hotX * scale, y = origin.y + clip.hotY * scale
@@ -532,10 +652,23 @@ struct InteractionSettings: View {
                 .help("连续快速往返甩动时临时放大，随后恢复。此开关控制 Gallery 的放大效果，系统自带的定位鼠标设置独立生效。")
             ScrollView {
               VStack(alignment: .leading, spacing: 16) {
+                GroupBox("光标外观 · 当前主题") {
+                  VStack(alignment: .leading, spacing: 12) {
+                    Toggle("抗锯齿（平滑缩放）", isOn: Binding(get: { store.theme.appearance.smoothEdges }, set: {
+                        var appearance = store.theme.appearance; appearance.smoothEdges = $0; store.setAppearance(appearance)
+                    }))
+                    Toggle("添加柔和阴影", isOn: Binding(get: { store.theme.appearance.shadow }, set: {
+                        var appearance = store.theme.appearance; appearance.shadow = $0; store.setAppearance(appearance)
+                    }))
+                    Text("阴影在应用主题时预先生成并缓存，会增加准备时间和部分缓存；移动时不实时计算阴影。关闭平滑可保留像素风格。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if store.editingActiveTheme { Text("暂停此主题后可更改外观。").font(.caption).foregroundStyle(.secondary) }
+                  }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 GroupBox("交互动画") {
                   VStack(alignment: .leading, spacing: 14) {
                     Toggle("鼠标静止时播放待机动画", isOn: $store.theme.idleEnabled)
-                    NumericSlider(title: "默认等待", value: $store.theme.idleDelay, range: 1...60, unit: "秒", inputRange: 1...600)
+                    NumericSlider(title: "默认等待", value: Binding(get: { store.theme.idleDelay }, set: { store.setDefaultIdleDelay($0) }), range: 1...60, unit: "秒", inputRange: 1...600, updatesWhileDragging: false)
                     Text("各角色可在「待机」页单独设置，未设置时使用此默认值。").font(.caption).foregroundStyle(.secondary)
                     Toggle("播放左键按下、按住与松手动画", isOn: $store.theme.clickEnabled)
                   }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -556,7 +689,7 @@ struct InteractionSettings: View {
                   }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 }
               }.padding(.vertical, 2)
-            }.disabled(runtime.enabled)
+            }.disabled(store.editingActiveTheme)
             HStack {
                 Button("检查输入监控授权") { runtime.requestInputAccess() }
                 Button("打开隐私设置") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!) }
@@ -571,7 +704,6 @@ struct InteractionSettings: View {
         .alert("启动设置", isPresented: Binding(get: { preferences.error != nil }, set: { if !$0 { preferences.error = nil } })) {
             Button("好") { preferences.error = nil }
         } message: { Text(preferences.error ?? "") }
-        .onChange(of: store.theme.idleDelay) { _, _ in store.changed() }
         .onChange(of: store.theme.idleEnabled) { _, _ in store.changed() }
         .onChange(of: store.theme.clickEnabled) { _, _ in store.changed() }
         .onChange(of: store.theme.excludedBundleIDs) { _, _ in store.changed() }

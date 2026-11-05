@@ -1,94 +1,54 @@
-# 验证与发布门槛
+# Testing Gallery
 
-## 0.7.2 每主题大小
+## Core checks
 
-- 47 项本地核心检查通过（真实 PRTS、Angelina 各一项可选集成），不带第三方素材的 CI 运行 45 项。
-- 主题整体大小写入 v2 归档，v1/v2 无字段时默认 100%；读取本机旧库可显式传入旧应用级大小，新导入不传此迁移值。验证显式值优先、非法值拒绝，以及 Cape 导出合并整体和角色大小且不修改原素材。
-- 编辑器隔离库验证两套旧主题初始化、独立调节／还原、切换与重开持久化、新导入默认值，及既有复制帧、混合、素材版本、重命名与删除回归。
-- 松手抽动本轮仅离线复核已有记录，没有更改播放机制或启动会修改系统光标的诊断；详见 [松手交接分析](CURSOR-RELEASE-ANALYSIS.md)。不得将大小检查通过当作 Finder 抽动已解决。
+```sh
+bash Scripts/check.sh
+```
 
-## 0.7.1 ANI 兼容与标题
+The default suite uses synthetic assets, requires no third-party downloads and does not change system cursors. It covers interaction timing, fast input edges, press/hold/release rules, role families, archive migration, independent theme/role sizes (25–300%), appearance and preview-cache invalidation, frame editing, CUR/ANI decoding, INF mapping, and bounded imports.
 
-- 46 项本地核心检查通过，包含真实 PRTS 与 Angelina 文件夹；不附带第三方素材的 CI 运行 44 项。
-- 自造 ANI 覆盖标准 RIFF 长度、仅多计 8 字节的兼容、截断和帧区块越界拒绝；坏素材错误包含文件名。
-- 24 位 CUR 验证 DWORD 行对齐、上下翻转、AND 透明遮罩、热点和缺失遮罩拒绝；已有 32 位解码回归保留。
-- Angelina 的 13 个原始 ANI 均成功导入并逐项比较帧、热点、尺寸、时长，归档往返一致。箭头首帧的透明像素与原遮罩的 1064 位一致；第三方素材只在本机使用。
-- 标题使用用户确认的 C 方案（系统 Zapfino），不分发字体文件，不增加动画时钟或运行时处理；隔离预览不启用自定义光标。
+Import fixtures include PE32/PE32+ managed resources; uncompressed and compressed .NET single-file manifest versions 1/2/6; duplicate ReadyToRun assets; standalone CUR/ANI; folder/INF/ZIP equivalence; UTF-16 INF; Unicode and legacy Chinese ZIP names; ZIP64; streaming Deflate; ZIP self-extractors; CRC corruption; invalid paths, offsets and declared lengths. Inno grouping/filtering uses synthetic directories; the bundled helper is checked separately.
 
-## 0.7.0 橱窗界面
+Optional integration tests use local files, never downloaded or uploaded by the suite:
 
-- 本轮43项核心检查含真实PRTS：新增非首角色的arrow首帧封面、192像素上限、失效／复用、缺失arrow占位和旧索引升级。
-- 编辑器独立目录验证未打开主题重命名不会切换选择，当前主题重命名保留角色与素材版本，封面合并及删除／待保存编辑的原有回归。
-- 隔离SwiftUI界面验证窗口未调用handleLaunch、不应用任何主题；实际点击进入PRTS、选择文本角色、返回首页、打开卡片菜单与取消删除。
-- 43项数量未包含原mon3tr EXE：原Downloads路径已被移除，本轮未修改其导入实现。不要把最初指定过期路径导致的文件不存在误作代码回归。
-- 橱窗内不创建TimelineView，封面为缓存PNG；只有主题编辑子页面保留可暂停的动画预览。
+- `GALLERY_RESOURCE_EXE`: an installer matching the resource-rich reference schema.
+- `GALLERY_WINDOWS_EXE` and optional `GALLERY_WINDOWS_ZIP`: the compact reference cursor installer and equivalent archive.
+- `GALLERY_CURSOR_DIRECTORY`: the reference 13-ANI folder.
 
+These tests expect the reference fixture structure; they are not generic validation commands for arbitrary artwork. Legacy environment variable aliases remain accepted. Fixtures are intentionally absent from the repository.
 
-## 0.6.0 主题管理与通用导入
+## Editor checks
 
-- `GALLERY_WINDOWS_EXE` 可指定本地 mon3tr 示例，`GALLERY_WINDOWS_ZIP` 指定对应 ZIP。连同真实 PRTS 共有43项检查；CI不附带第三方素材，会运行其余自造数据检查。
-- 真实 EXE 的17个ANI全部与解码结果逐帧／几何／时长核对，并比较ZIP、文件夹、直接INF与导出重新打开的结果。
-- 自造CUR与INF覆盖UTF-16、常见文件名、INF优先、未分类素材、缺失引用及过长替换拒绝；文件夹不跟随内部符号链接。
-- 编辑器测试向独立回收目录移动主题，验证删除非当前主题、删除最后一套、待保存编辑、延迟保存与失败隔离，不使用用户废纸篓。
-- 0.6.0渲染逻辑保持0.5.4；未启动会改变全局光标的测试。实际主题使用／停用路径沿用既有运行层，启动后自动应用改为优先最后成功使用的主题。
+```sh
+bash Scripts/editor-check.sh /tmp/gallery-editor-check
+```
 
+Use a fresh directory. This verifies isolated libraries, per-theme sizes, 25% bounds, drag ordering, pending saves, material variants, mixed/native roles, role aliases, covers, rename and whole-theme deletion. It does not enable cursors, change login items or modify the normal user library.
 
-## 0.5.4 验证
+## System cursor checks
 
-- 40项核心检查（含本地真实PRTS安装器）：新增备选素材提取、切换保留编辑、去重归档和无效选项拒绝。
-- 编辑器独立目录回归：角色别名同步、其他角色不变、旧素材保留和重新加载；不改用户库或登录项。
-- 深浅色设置与素材选项已离屏渲染检查，待机行没有重复标题或换行。
-- 用户反馈：第三方文字闪烁修复；Dock、调度中心点按可用；Chrome地址栏仍有问题，按指示暂缓。
-- 系统回归包含后来移除的临时地址栏保持试验；不能称最终地址栏行为已通过。最终未再启动全局光标测试，所有诊断正常恢复退出。
+Stop and quit any running cursor replacement first. These checks temporarily replace system resources and keep an independent recovery journal in the supplied directory. Run them sequentially, with a compatible `.gallery` fixture:
 
-自动检查与人工体验是两类证据。构建成功、资源导入成功不等于全局交互已经
-在所有应用内验证。首次启用后务必保留菜单栏的停用入口。
+```sh
+bash Scripts/runtime-check.sh /tmp/gallery-runtime-check /path/to/theme.gallery
+bash Scripts/settings-check.sh /tmp/gallery-settings-check /path/to/theme.gallery
+```
 
-## 自动检查
+The settings fixture must include the expected 32-point geometry, animated roles and an alternate static text variant. Checks cover visible frame progression, press/hold/release continuity, stale observation rejection, resizing, appearance, active-theme edit isolation and restoration. They do not move the pointer or post OS input events. A passing controlled check does not prove every foreground application behaves correctly.
 
-- 0.5.3：同角色旧帧不可认作当前帧；松手接续已显示帧，不回退且保持后续停留时长。
-- 文字循环在短暂区域重建中保留进度；系统重选时静态注册项与实际当前图像一致，性能采样断言实际推进足够帧数。
-- Finder文件夹拖放的偶发抽动仍待处理，不能以这些受控检查替代真实验证。
+## Desktop review before release
 
-- `bash Scripts/check.sh`：快速点击中断、再次按下清除旧计时器、拖住不待机。
-- 位图条带双向转换保留帧序、热点、时长；24 帧采样保留总时长。
-- CUR 热点和 PNG 帧解析，拒绝坏文件、重复角色、无穷或非数值几何。
-- 可选真实 PRTS：CLI ManifestResource 只读提取，ANI 时序与帧解码，转换为 cape。
-- `bash Scripts/build.sh`：编译、应用包布局、Info.plist、临时签名验证。
-- 回归检查：按住素材决定交互、旧开关迁移、快速点击计数、完整 PRTS 状态映射、v2 主题去重。
-- WindowServer 动画条带识别、尺寸和热点同步缩放及源素材不变。
-- 原生角色、独立大小、混合角色来源的归档兼容；复制帧的顺序与上限；目录索引验证。
-- `Scripts/editor-check.sh <新目录>`：只使用传入的独立目录，验证旧单主题迁移、多目录切换、复制帧、角色设置与混合素材保存。
-- `Scripts/runtime-check.sh <新目录> <主题.gallery>`：自己的 AppKit 测试进程和独立恢复记录；不移动鼠标、不注入系统输入。
-  检查实际系统图像、300 次快速切换、延迟编号确认、过时结果拒绝、注册调整常态交还前台，以及仅移动时返回普通箭头。
-- 真实主题中有按住素材的各角色族，分别检查保持按住、跨角色拖放/焦点切换不重置时序、迟到边沿不重播松手。
-- 甩动曲线的单次触发、连续单调缩小与平滑收尾由核心检查验证；CPU 方法见 [性能记录](PERFORMANCE.md)。
-- `--self-check`：检测私有接口的符号是否存在；不证明调用行为兼容。
+Review arrows, text and links while stationary and moving in native and third-party apps. Test rapid clicks, held drags and release, idle, resize dividers, Dock, Mission Control, Spaces/full screen, custom application cursors, shake-to-enlarge, changing size, import previews, stop/quit and recovery. The application supplies the native role; Gallery does not inspect page contents to infer links. Some applications intentionally choose an arrow in editable text.
 
-## 需要在实际桌面执行
+Performance measurements must preserve theme, scale, frame rate and observation mode. Report CPU separately from WindowServer and from energy use. A callback or resource-preparation timing is not physical input-to-display latency. See [1.0 measurements](PERFORMANCE-1.0.0.md).
 
-| 场景 | 预期结果 |
-|---|---|
-| Finder、Safari/Chrome、TextEdit 之间切换 | 箭头、链接、文本保持正确角色 |
-| 快速单击、双击、按住后松开 | 无卡住；松开中断按下动画 |
-| 选中文字、拖动文件、打开菜单 | 不拦截事件，不改变拖拽行为 |
-| 停留到待机阈值，再移动、滚动或点击 | 进入待机并立即退出；待机按鼠标活动定义 |
-| 加入暂停交互应用 | 使用常态，切回后恢复交互 |
-| 切换 Space、全屏、不同缩放的显示器 | 无错位或残留交互资源 |
-| 停用、退出、休眠唤醒 | 恢复对应主题资源 |
-| 强制结束进程后重开 | 提示恢复记录，恢复按钮可用 |
-| Mousecape 使用自定义主题后启用、再停用 | 还原启用前的自定义主题，而非强制默认箭头 |
-| 断开／拒绝输入权限 | 不应崩溃或改变点击投递；可停用 |
-| 大小滑块后进入未知自绘光标，再返回箭头 | 自绘光标保持原尺寸，箭头恢复所选大小 |
-| 放入应用程序后开启登录项，注销并登录 | 启动 Gallery；自动应用由独立开关控制，恢复记录优先 |
-| 展开、切换主题目录后重新打开应用 | 各目录保留编辑；浏览不自动改变正在运行的主题 |
-| 复制帧，再混入另一个主题的角色 | 帧序正确；目标角色用途与大小保留；导出文件不依赖来源目录 |
-| Dock 悬停、移出和连续快速变化 | 不叠加原生指针；隐藏与恢复请求保持平衡 |
-| 分隔条紧邻窗口边缘，移出后继续悬停 | 随前台应用切回正确角色；不依赖窗口展开 |
-| Finder 拖放松手、弹窗聚焦后点桌面 | 同一手势只播放一次松手，不因角色/焦点切换重启 |
-| 甩动放大后停止 | 一轮连续缩小，无第二次放大 |
+## Release package
 
-链接角色代表前台应用的手形/可点击指针，不读取网页或聊天内容判断 URL。视频入口本身若使用手形，会显示链接角色；应用若仍提供箭头，Gallery 不凭文字内容推断链接。
+```sh
+GALLERY_UNIVERSAL=1 bash Scripts/build.sh
+```
 
-独占游戏、自绘光标、安全界面和不同系统版本不保证。先验证目标机器日常常用
-应用后，再扩大兼容范围。自启动与自动应用默认关闭，启用时仍优先处理恢复记录。
+Verify both Mach-O architectures, signatures after unzip, embedded helper launch, version, dependency paths, required fonts/licenses and archive integrity. Search the final shipped binaries and documentation for local user paths and private fixture names. Keep debug symbols, credentials, recovery journals and third-party artwork outside the published archive.
+
+Releases are ad-hoc signed unless a Developer ID identity is supplied. This does not imply notarization. A push to `main` builds and checks an artifact; it does not automatically publish a release.

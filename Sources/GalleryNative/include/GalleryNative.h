@@ -24,8 +24,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (int32_t)registerCursor:(NSDictionary<NSString *, id> *)cursor identifier:(NSString *)identifier;
 + (int32_t)updateCursor:(NSDictionary<NSString *, id> *)cursor identifier:(NSString *)identifier refresh:(BOOL)refresh;
 + (nullable GLCursorResource *)prepareCursor:(NSDictionary<NSString *, id> *)cursor;
++ (nullable GLCursorResource *)prepareImages:(NSArray *)images frameCount:(NSUInteger)count frameDuration:(NSTimeInterval)duration size:(CGSize)size hotSpot:(CGPoint)hotSpot;
 + (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers;
 + (int32_t)applyPreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers showImmediately:(BOOL)show;
++ (int32_t)storePreparedCursor:(GLCursorResource *)cursor identifiers:(NSArray<NSString *> *)identifiers globally:(BOOL)global;
 + (int32_t)selectCursorIdentifier:(NSString *)identifier;
 + (int32_t)cursorSeed;
 + (nullable NSDictionary<NSString *, id> *)standardCursor:(NSString *)identifier;

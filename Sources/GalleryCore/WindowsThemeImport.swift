@@ -6,21 +6,50 @@ import CryptoKit
 /// command, DLL or INF action is executed.
 public enum WindowsThemeImport {
     public static func load(_ url: URL) throws -> GalleryTheme {
+        guard let first = try candidates(url).first else { throw ThemeError.invalid("安装包中没有可导入的光标。") }
+        return first
+    }
+    public static func candidates(_ url: URL) throws -> [GalleryTheme] {
         if (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true { return try loadDirectory(url) }
         if url.pathExtension.lowercased() == "inf" { return try loadDirectory(url.deletingLastPathComponent(), selectedINF: url.lastPathComponent) }
-        if url.pathExtension.lowercased() == "zip" { return try loadZIP(url) }
+        if ["cur", "ani"].contains(url.pathExtension.lowercased()) {
+            guard try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 <= 40_000_000 else { throw ThemeError.invalid("单个光标文件超过 40 MB。") }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            var imported = try theme(files: [url.lastPathComponent: data], name: url.deletingPathExtension().lastPathComponent)
+            if imported.roles.allSatisfy({ $0.id.hasPrefix("com.apple.gallery.Imported.") }), let role = imported.roles.first {
+                imported.roles = [CursorRole(id: "com.apple.coregraphics.Arrow", name: CursorCatalog.title("com.apple.coregraphics.Arrow"), clips: role.clips)]
+            }
+            return [imported]
+        }
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= 600_000_000 else { throw ThemeError.invalid("安装包超过 600 MB。") }
-        let resources: WindowsResources
-        do { resources = try WindowsResources(data: Data(contentsOf: url, options: .mappedIfSafe)) }
-        catch { throw ThemeError.invalid("无法直接读取此 EXE 的内嵌光标。当前支持内嵌 CUR／ANI 的 .NET 安装器；其他打包方式请提供解压后的光标 ZIP。\n\(error.localizedDescription)") }
+        guard size <= WindowsResources.maximumInstallerBytes else { throw ThemeError.invalid("安装包超过 2 GB。") }
+        if url.pathExtension.lowercased() == "zip" { return try loadZIP(url) }
+        if try InnoCursorImport.recognizes(url) { return try InnoCursorImport.load(url) }
+        let packages: [WindowsResources]
+        do {
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            packages = try DotNetBundle.resources(in: data) ?? [WindowsResources(data: data)]
+        }
+        catch {
+            if (try? CursorZIP(url)) != nil { return try loadZIP(url) }
+            throw ThemeError.invalid("无法直接读取此 EXE 的内嵌光标。支持 .NET、.NET 单文件、Inno Setup 和含 ZIP 素材的封装；其他形式请先解压出 CUR／ANI。\n\(error.localizedDescription)")
+        }
+        return try packages.flatMap { resources in
         if resources.resource(suffix: "normal.cur") != nil,
-           resources.entries.keys.contains(where: { $0.hasPrefix("PRTS-Replica-") }) { return try resources.theme() }
-        let files = Dictionary(uniqueKeysWithValues: resources.entries.keys.map { ($0, resources.resource(named: $0)!) })
-        return try theme(files: files, name: url.deletingPathExtension().lastPathComponent)
+           resources.entries.keys.contains(where: { $0.hasPrefix("PRTS-Replica-") }) { return [try resources.theme()] }
+        // Bound only extracted cursor/config data, not wallpaper or icon payloads.
+        var files: [String: Data] = [:], total = 0
+        for name in resources.entries.keys.sorted() {
+            if name.lowercased().hasSuffix(".inf"), resources.entries[name]!.count > 1_000_000 { continue }
+            total += resources.entries[name]!.count
+            guard total <= 80_000_000 else { throw ThemeError.invalid("安装包中的光标素材超过 80 MB，请拆分主题。") }
+            files[name] = resources.resource(named: name)
+        }
+        return try groupedThemes(files: files, name: url.deletingPathExtension().lastPathComponent)
+        }
     }
 
-    private static func loadDirectory(_ url: URL, selectedINF: String? = nil) throws -> GalleryTheme {
+    private static func loadDirectory(_ url: URL, selectedINF: String? = nil) throws -> [GalleryTheme] {
         let base = url.standardizedFileURL
         var scanError: Error?
         guard let iterator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
@@ -30,7 +59,7 @@ public enum WindowsThemeImport {
         var files: [String: Data] = [:], installers: [URL] = [], count = 0, total = 0
         for case let file as URL in iterator {
             count += 1
-            guard count <= 10000 else { throw ThemeError.invalid("文件夹内容过多，请选择单独一套鼠标主题的文件夹。") }
+            guard count <= 50000 else { throw ThemeError.invalid("文件夹内容过多，请选择光标素材子文件夹。") }
             let info = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
             if info.isSymbolicLink == true { iterator.skipDescendants(); continue }
             guard info.isRegularFile == true else { continue }
@@ -39,6 +68,10 @@ public enum WindowsThemeImport {
             guard ["cur", "ani", "inf"].contains(ext) else { continue }
             if ext == "inf", let selectedINF, file.standardizedFileURL != base.appendingPathComponent(selectedINF) { continue }
             let size = info.fileSize ?? 0
+            if ext == "inf", size > 1_000_000 {
+                if selectedINF != nil { throw ThemeError.invalid("安装配置超过 1 MB。") }
+                continue
+            }
             total += size
             guard size <= 40_000_000, total <= 80_000_000, files.count < 1000 else { throw ThemeError.invalid("文件夹的光标素材过多或超过 80 MB，请拆分主题。") }
             let path = file.standardizedFileURL.path
@@ -47,51 +80,50 @@ public enum WindowsThemeImport {
         }
         if let scanError { throw scanError }
         if !files.keys.contains(where: { ["cur", "ani"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }) {
-            if let prts = installers.first(where: { $0.lastPathComponent.lowercased() == "prts-setup.exe" }) { return try load(prts) }
-            if installers.count == 1 { return try load(installers[0]) }
+            if let prts = installers.first(where: { $0.lastPathComponent.lowercased() == "prts-setup.exe" }) { return try candidates(prts) }
+            if installers.count == 1 { return try candidates(installers[0]) }
             throw ThemeError.invalid("文件夹中没有 CUR／ANI 光标。若有多个 EXE，请直接选择包含素材的安装器。")
         }
-        return try theme(files: files, name: base.lastPathComponent)
+        return try groupedThemes(files: files, name: base.lastPathComponent)
     }
 
-    private static func loadZIP(_ url: URL) throws -> GalleryTheme {
-        // Stream named members rather than extracting paths from an untrusted
-        // archive. A bounded file handle also limits expanded data on disk.
-        let namesData = try unzip(url, arguments: ["-Z1"], limit: 2_000_000)
-        guard let listing = String(data: namesData, encoding: .utf8) else { throw ThemeError.invalid("ZIP 文件名编码无法识别。") }
-        let names = listing.split(whereSeparator: \.isNewline).map(String.init)
-        guard names.count <= 10000 else { throw ThemeError.invalid("ZIP 文件数量过多。") }
-        if let setup = names.first(where: { filename($0).lowercased() == "prts-setup.exe" }) {
+    private static func loadZIP(_ url: URL) throws -> [GalleryTheme] {
+        let archive = try CursorZIP(url)
+        let assets = archive.entries.filter { ["cur", "ani", "inf"].contains(URL(fileURLWithPath: $0.name).pathExtension.lowercased()) }
+        let hasCursors = assets.contains { ["cur", "ani"].contains(URL(fileURLWithPath: $0.name).pathExtension.lowercased()) }
+        let installers = archive.entries.filter { $0.name.lowercased().hasSuffix(".exe") }
+        let installer = installers.first(where: { filename($0.name).lowercased() == "prts-setup.exe" })
+            ?? (installers.count == 1 ? installers.first : nil)
+        func read(_ entry: CursorZIP.Entry, limit: Int, to destination: URL? = nil) throws -> Data {
+            guard !entry.link, entry.flags & 1 == 0 else { throw ThemeError.invalid("ZIP 中的光标为链接或已加密，请先解压后导入。") }
+            if [0, 8].contains(entry.method) { return try archive.read(entry, limit: limit, to: destination) }
+            return try unzip(url, arguments: ["-p"], member: entry.name, limit: limit, to: destination)
+        }
+        if !hasCursors, let setup = installer {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: directory) }
-            let target = directory.appendingPathComponent("PRTS-Setup.exe")
-            try unzip(url, arguments: ["-p"], member: setup, limit: 600_000_000).write(to: target)
-            return try load(target)
+            let target = directory.appendingPathComponent(filename(setup.name))
+            _ = try read(setup, limit: WindowsResources.maximumInstallerBytes, to: target)
+            return try candidates(target)
         }
-        let assets = names.filter { ["cur", "ani", "inf"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }
-        if assets.isEmpty, let exe = names.first(where: { $0.lowercased().hasSuffix(".exe") }),
-           names.filter({ $0.lowercased().hasSuffix(".exe") }).count == 1 {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let target = directory.appendingPathComponent(filename(exe))
-            try unzip(url, arguments: ["-p"], member: exe, limit: 600_000_000).write(to: target)
-            return try load(target)
-        }
-        guard !assets.isEmpty, assets.count <= 1000, Set(assets).count == assets.count else {
+        guard hasCursors, assets.count <= 1000, Set(assets.map(\.name)).count == assets.count else {
             throw ThemeError.invalid("ZIP 中没有可识别的光标，或包含过多／重名文件。请提供 CUR、ANI 和安装 INF，或包含素材的 EXE。")
         }
         var files: [String: Data] = [:], total = 0
-        for name in assets.sorted() {
-            let data = try unzip(url, arguments: ["-p"], member: name, limit: 40_000_000)
+        for entry in assets.sorted(by: { $0.name < $1.name }) {
+            let data: Data
+            if entry.name.lowercased().hasSuffix(".inf") {
+                guard entry.size <= 1_000_000, let configuration = try? read(entry, limit: 1_000_000) else { continue }
+                data = configuration
+            } else { data = try read(entry, limit: 40_000_000) }
             total += data.count
             guard total <= 80_000_000 else { throw ThemeError.invalid("ZIP 展开的光标素材超过 80 MB。") }
-            files[name] = data
+            files[entry.name] = data
         }
-        return try theme(files: files, name: url.deletingPathExtension().lastPathComponent)
+        return try groupedThemes(files: files, name: url.deletingPathExtension().lastPathComponent)
     }
-    private static func unzip(_ url: URL, arguments: [String], member: String? = nil, limit: Int) throws -> Data {
+    private static func unzip(_ url: URL, arguments: [String], member: String? = nil, limit: Int, to destination: URL? = nil) throws -> Data {
         let process = Process(), pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         let literal = member.map { name -> String in
@@ -104,14 +136,25 @@ public enum WindowsThemeImport {
         }
         process.arguments = arguments + [url.path] + (literal.map { [$0] } ?? [])
         process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+        let output: FileHandle?
+        if let destination {
+            guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw ThemeError.invalid("无法创建临时安装包。") }
+            output = try FileHandle(forWritingTo: destination)
+        } else { output = nil }
+        defer { try? output?.close() }
         try process.run()
-        defer { try? pipe.fileHandleForReading.close() }
-        var result = Data()
+        defer {
+            try? pipe.fileHandleForReading.close()
+            if process.isRunning { process.terminate(); process.waitUntilExit() }
+        }
+        var result = Data(), total = 0
         while let chunk = try pipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
-            guard result.count + chunk.count <= limit else {
-                process.terminate(); process.waitUntilExit(); throw ThemeError.invalid("ZIP 展开数据超过限制。")
+            total += chunk.count
+            guard total <= limit else {
+                throw ThemeError.invalid(destination == nil ? "ZIP 展开数据超过限制。" : "ZIP 内安装包超过 2 GB。")
             }
-            result.append(chunk)
+            if let output { try output.write(contentsOf: chunk) }
+            else { result.append(chunk) }
         }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw ThemeError.invalid("ZIP 文件损坏或成员无法读取。") }
@@ -134,12 +177,32 @@ public enum WindowsThemeImport {
         "sizenwse": ["diagonal1", "dgn1", "sizenwse"], "sizenesw": ["diagonal2", "dgn2", "sizenesw"],
         "no": ["unavailable", "unavail", "no", "不可用"], "pin": ["pin", "location", "定位选择"], "person": ["person", "人员选择"]
     ]
+    private static func groupedThemes(files: [String: Data], name: String) throws -> [GalleryTheme] {
+        let configured = try files.keys.filter { $0.lowercased().hasSuffix(".inf") }.filter { !(try parseINF(files[$0]!)).roles.isEmpty }
+        let directories = Set(configured.map { ($0.replacingOccurrences(of: "\\", with: "/") as NSString).deletingLastPathComponent })
+        let roots = directories.filter { directory in
+            !directory.isEmpty && !directories.contains { $0 != directory && (directory.hasPrefix($0 + "/") || $0.isEmpty) }
+        }.sorted()
+        let cursors = files.keys.filter { ["cur", "ani"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }
+        // Split independent configured sets only when every cursor belongs to
+        // one of them. Otherwise preserve the existing all-materials import.
+        guard roots.count > 1, cursors.allSatisfy({ file in roots.contains { file.replacingOccurrences(of: "\\", with: "/").hasPrefix($0 + "/") } }) else {
+            return [try theme(files: files, name: name)]
+        }
+        guard roots.count <= 80 else { throw ThemeError.invalid("光标套装超过 80 套，请拆分导入。") }
+        return try roots.map { root in
+            let selected = files.filter { $0.key.replacingOccurrences(of: "\\", with: "/").hasPrefix(root + "/") }
+            return try theme(files: selected, name: name + " · " + (root as NSString).lastPathComponent)
+        }
+    }
     public static func theme(files: [String: Data], name: String) throws -> GalleryTheme {
         let assets = files.keys.filter { ["cur", "ani"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }.sorted()
         guard !assets.isEmpty, assets.count <= 1000 else { throw ThemeError.invalid("没有可读取的 CUR／ANI 素材，或素材数量过多。") }
         var declarations: [String: [String]] = [:], scheme = name
         for inf in files.keys.filter({ $0.lowercased().hasSuffix(".inf") }).sorted() {
+            guard files[inf]!.count <= 1_000_000 else { continue }
             let parsed = try parseINF(files[inf]!)
+            guard !parsed.roles.isEmpty else { continue }
             if let title = parsed.name { scheme = title }
             for (key, values) in parsed.roles { declarations[key, default: []] += values }
         }
@@ -155,6 +218,11 @@ public enum WindowsThemeImport {
         let declaredAssets = Set(choices.values.flatMap { $0[.normal] ?? [] })
         for asset in assets where !declaredAssets.contains(asset) {
             let stem = URL(fileURLWithPath: filename(asset)).deletingPathExtension().lastPathComponent.lowercased()
+            // Common seventeen-role sets call background activity "busy" and
+            // the blocking wait cursor "wait". Preserve their distinct roles.
+            if stem == "busy", assets.contains(where: { URL(fileURLWithPath: filename($0)).deletingPathExtension().lastPathComponent.lowercased() == "wait" }) {
+                choices["appstarting", default: [:]][.normal, default: []].append(asset); continue
+            }
             var assigned = false
             for key in aliases.keys.sorted() {
                 var bases = aliases[key]! + (declarations[key] ?? []).map { URL(fileURLWithPath: filename($0)).deletingPathExtension().lastPathComponent.lowercased() }
@@ -269,6 +337,7 @@ public enum WindowsThemeImport {
                 let reference = try expand(f[4]); roles[f[2].lowercased(), default: []].append(reference)
             }
         }
+        guard !roles.isEmpty else { return (nil, [:]) }
         let title = try strings["scheme_name"].map(expand).flatMap { $0.isEmpty || $0.contains("%") ? nil : $0 }
         return (title, roles)
     }

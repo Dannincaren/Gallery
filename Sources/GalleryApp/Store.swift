@@ -3,23 +3,31 @@ import Combine
 import GalleryCore
 import UniformTypeIdentifiers
 
+struct ThemeImportReview: Identifiable {
+    let id = UUID()
+    let themes: [GalleryTheme]
+}
+
 @MainActor
 final class GalleryStore: ObservableObject {
     @Published var theme: GalleryTheme
     @Published var selectedRole = ""
     @Published var selectedMotion: Motion = .normal
     @Published var message: String?
+    @Published var importReview: ThemeImportReview?
     @Published private(set) var importing = false
     @Published private(set) var saveStatus = "已保存在本机"
     @Published private(set) var library: [LibraryTheme] = []
     @Published private(set) var selectedThemeID: String
     @Published private(set) var activeThemeID: String?
-    let runtime = CursorRuntime()
+    let runtime: CursorRuntime
     let preferences = AppPreferences()
     private let root: URL
     private let preview: Bool
     private let selectionDefaults: Bool
     private let loadStoredTheme: @Sendable (URL) throws -> GalleryTheme
+    private let themeReads = ThemeReadCache()
+    private var pendingThemePreparation: DispatchWorkItem?
     private let saveQueue = DispatchQueue(label: "Gallery.theme-files", qos: .utility)
     private var handledLaunch = false
     private var pendingSave: DispatchWorkItem?
@@ -33,9 +41,10 @@ final class GalleryStore: ObservableObject {
     private var pendingDockRefresh: DispatchWorkItem?
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
-    init(preview: Bool = false, rootURL: URL? = nil, legacyPointerScale: Double? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+    init(preview: Bool = false, rootURL: URL? = nil, legacyPointerScale: Double? = nil, runtime: CursorRuntime? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+        self.runtime = runtime ?? CursorRuntime()
         let savedScale = legacyPointerScale ?? (rootURL == nil && !preview ? UserDefaults.standard.double(forKey: "pointerScale") : 1)
-        let inheritedScale = savedScale.isFinite && (0.5...3).contains(savedScale) ? savedScale : 1
+        let inheritedScale = savedScale.isFinite && (0.25...3).contains(savedScale) ? savedScale : 1
         let read: @Sendable (URL) throws -> GalleryTheme = { try ThemeFiles.load($0, legacyPointerScale: inheritedScale) }
         loadStoredTheme = read
         self.trashThemeFile = trashThemeFile ?? { url in
@@ -112,6 +121,7 @@ final class GalleryStore: ObservableObject {
         return library.first(where: { $0.id == activeThemeID })?.name
     }
     func isActiveTheme(_ id: String) -> Bool { runtime.enabled && activeThemeID == id }
+    var editingActiveTheme: Bool { isActiveTheme(selectedThemeID) }
     func applyCurrentTheme() {
         guard !importing else { return }
         saveNow(wait: true)
@@ -127,14 +137,14 @@ final class GalleryStore: ObservableObject {
     var roleIndex: Int? { theme.roles.firstIndex { $0.id == selectedRole } }
     var clip: CursorClip? { roleIndex.flatMap { theme.roles[$0].clip(selectedMotion) } }
     func edit(_ action: (inout CursorClip) -> Void) {
-        guard !runtime.enabled, let index = roleIndex, var clip else { return }
+        guard !editingActiveTheme, let index = roleIndex, var clip else { return }
         action(&clip)
         let family = CursorCatalog.family(theme.roles[index].id)
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func duplicateFrame(at index: Int) -> Int? {
-        guard !runtime.enabled, var clip else { return nil }
+        guard !editingActiveTheme, var clip else { return nil }
         do {
             let inserted = try clip.duplicateFrame(at: index)
             edit { $0 = clip }; return inserted
@@ -149,7 +159,7 @@ final class GalleryStore: ObservableObject {
         theme.coverFrame = nil; changed(); saveNow()
     }
     func selectVariant(_ id: String, for motion: Motion) {
-        guard !runtime.enabled, let index = roleIndex else { return }
+        guard !editingActiveTheme, let index = roleIndex else { return }
         var role = theme.roles[index]; role.selectVariant(id, for: motion)
         copyVariants(role, motion: motion)
         changed()
@@ -163,7 +173,7 @@ final class GalleryStore: ObservableObject {
         }
     }
     func addVariant(_ clip: CursorClip, name: String, for motion: Motion) throws {
-        guard !runtime.enabled, let index = roleIndex else { return }
+        guard !editingActiveTheme, let index = roleIndex else { return }
         try clip.validate()
         let key = motion.rawValue
         guard (theme.roles[index].variants[key]?.count ?? 0) < 31 else { throw ThemeError.invalid("每个状态最多保留 32 套素材。") }
@@ -174,7 +184,7 @@ final class GalleryStore: ObservableObject {
         changed()
     }
     func importVariant() {
-        guard !runtime.enabled else { return }
+        guard !editingActiveTheme else { return }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .data]; panel.allowsMultipleSelection = false
         panel.message = "为「\(selectedMotion.title)」添加另一套素材，保留已有版本。支持 PNG、GIF、CUR、ANI。"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -182,13 +192,13 @@ final class GalleryStore: ObservableObject {
         catch { message = error.localizedDescription }
     }
     func createClip() {
-        guard !runtime.enabled, let index = roleIndex else { return }
+        guard !editingActiveTheme, let index = roleIndex else { return }
         let family = CursorCatalog.family(theme.roles[index].id), clip = theme.roles[index].clip(.normal)
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func removeClip() {
-        guard !runtime.enabled, selectedMotion != .normal, let index = roleIndex else { return }
+        guard !editingActiveTheme, selectedMotion != .normal, let index = roleIndex else { return }
         let family = CursorCatalog.family(theme.roles[index].id)
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
         changed()
@@ -203,23 +213,40 @@ final class GalleryStore: ObservableObject {
                     updated.roles[i].thumbnail = previous.thumbnail; updated.roles[i].thumbnailKey = previous.thumbnailKey
                 }
             }
-            library[index] = updated
+            if updated != old { library[index] = updated }
         }
     }
     func changed() {
-        revision += 1; refreshEntry(); pendingSave?.cancel(); saveStatus = "正在保存…"
+        revision += 1; refreshEntry(); pendingSave?.cancel()
+        if saveStatus != "正在保存…" { saveStatus = "正在保存…" }
         let task = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveNow() } }
         pendingSave = task; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: task)
     }
+    func saveIfNeeded() {
+        if pendingSave != nil || saveStatus != "已保存在本机" { saveNow() }
+    }
+    func prepareTheme(_ id: String) {
+        cancelThemePreparation()
+        guard id != selectedThemeID, library.contains(where: { $0.id == id }) else { return }
+        let url = themeURL(id), read = loadStoredTheme, cache = themeReads
+        let task = DispatchWorkItem {
+            guard cache.canPrepare(url) else { return }
+            _ = try? cache.load(url, read: read)
+        }
+        pendingThemePreparation = task
+        saveQueue.asyncAfter(deadline: .now() + 0.08, execute: task)
+    }
+    func cancelThemePreparation() { pendingThemePreparation?.cancel(); pendingThemePreparation = nil }
     func saveNow(wait: Bool = false) {
         guard !preview, !deletingTheme else { return }
         pendingSave?.cancel(); pendingSave = nil; refreshEntry(); revision += 1
         let version = revision, snapshot = theme, rows = library, id = selectedThemeID
-        let destination = themeURL(id), root = self.root
+        let destination = themeURL(id), root = self.root, cache = themeReads
         if selectionDefaults { UserDefaults.standard.set(id, forKey: "currentThemeID") }
         let write = {
             try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try ThemeFiles.save(snapshot, to: destination)
+            cache.remember(snapshot, at: destination)
             let row = ThemeLibrary.thumbnails(id: id, theme: snapshot, previous: rows.first { $0.id == id })
             var updatedRows = rows
             if let index = updatedRows.firstIndex(where: { $0.id == id }) { updatedRows[index] = row }
@@ -247,6 +274,7 @@ final class GalleryStore: ObservableObject {
     private func mergeThumbnails(_ row: LibraryTheme) {
         guard let index = library.firstIndex(where: { $0.id == row.id }) else { return }
         var updated = library[index]
+        updated.appearance = row.appearance
         updated.cover = row.cover; updated.coverKey = row.coverKey
         for i in updated.roles.indices {
             if let source = row.roles.first(where: { $0.id == updated.roles[i].id }) {
@@ -254,18 +282,19 @@ final class GalleryStore: ObservableObject {
                 updated.roles[i].thumbnailKey = source.thumbnailKey
             }
         }
-        library[index] = updated
+        if library[index] != updated { library[index] = updated }
     }
     func ensureThumbnails(_ id: String) {
-        guard !preview, let entry = library.first(where: { $0.id == id }), (entry.roles.contains(where: { $0.thumbnail == nil }) || (entry.cover == nil && entry.roles.contains(where: { CursorCatalog.isArrow($0.id) }))), !thumbnailJobs.contains(id) else { return }
+        guard !preview, let entry = library.first(where: { $0.id == id }), ThemeLibrary.needsThumbnails(entry), !thumbnailJobs.contains(id) else { return }
         if id == selectedThemeID { saveNow(); return }
         thumbnailJobs.insert(id)
-        let url = themeURL(id), capturedLibrary = libraryRevision, read = loadStoredTheme
+        let url = themeURL(id), capturedLibrary = libraryRevision, capturedRevision = revision, read = loadStoredTheme
         saveQueue.async { [weak self] in
             let row = (try? read(url)).map { ThemeLibrary.thumbnails(id: id, theme: $0, previous: entry) }
             DispatchQueue.main.async {
                 guard let self else { return }; self.thumbnailJobs.remove(id)
                 guard capturedLibrary == self.libraryRevision, self.library.contains(where: { $0.id == id }) else { return }
+                guard id != self.selectedThemeID || capturedRevision == self.revision else { return }
                 if let row {
                     self.mergeThumbnails(row)
                     let rows = self.library, url = self.indexURL
@@ -313,10 +342,16 @@ final class GalleryStore: ObservableObject {
             if activate { applyCurrentTheme() }; return
         }
         guard !importing, library.contains(where: { $0.id == id }) else { return }
-        saveNow(); importing = true
-        let url = themeURL(id), read = loadStoredTheme
-        saveQueue.async { [weak self] in
-            let result = Result { try read(url) }
+        cancelThemePreparation(); saveIfNeeded(); importing = true
+        let url = themeURL(id), read = loadStoredTheme, cache = themeReads, compatibility = root.appendingPathComponent("current.gallery")
+        saveQueue.async(qos: .userInitiated) { [weak self] in
+            let result = Result {
+                let theme = try cache.load(url, read: read)
+                // Preserve the legacy current-theme file without re-encoding
+                // all images and aliases when navigation did not edit them.
+                try Data(contentsOf: url, options: .mappedIfSafe).write(to: compatibility, options: .atomic)
+                return theme
+            }
             DispatchQueue.main.async {
                 guard let self else { return }; self.importing = false
                 // The save and load use the same serial queue; its save-result
@@ -335,9 +370,9 @@ final class GalleryStore: ObservableObject {
     }
     func loadLibraryTheme(_ id: String, completion: @escaping (Result<GalleryTheme, Error>) -> Void) {
         if id == selectedThemeID { completion(.success(theme)); return }
-        let url = themeURL(id), read = loadStoredTheme
+        let url = themeURL(id), read = loadStoredTheme, cache = themeReads
         saveQueue.async {
-            let result = Result { try read(url) }
+            let result = Result { try cache.load(url, read: read) }
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -416,27 +451,82 @@ final class GalleryStore: ObservableObject {
     }
     func openTheme() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.item]; panel.allowsMultipleSelection = false; panel.canChooseDirectories = true
-        panel.message = "导入后会保存为独立主题目录。支持主题文件、Windows 光标文件夹、INF、ZIP 和内嵌 CUR／ANI 的 .NET EXE。"; panel.prompt = "导入"
+        panel.message = "支持最高 2 GB 的 ZIP、含光标的 .NET／单文件／Inno Setup EXE，以及 CUR、ANI、光标文件夹、INF、Gallery／Mousecape 主题。多套素材可先勾选；仅提取光标，原文件不会改动。"; panel.prompt = "导入"
         guard panel.runModal() == .OK, let url = panel.url else { return }; importURL(url)
     }
     func importURL(_ url: URL) {
-        guard !importing else { return }
+        guard !importing, importReview == nil else { return }
         let ext = url.pathExtension.lowercased()
         let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-        guard directory || ["gallery", "cape", "zip", "exe", "inf"].contains(ext) else { message = "请选择主题文件、光标素材文件夹、INF、ZIP 或 EXE 安装器。"; return }
+        guard directory || ["gallery", "cape", "zip", "exe", "inf", "cur", "ani"].contains(ext) else { message = "请选择主题文件、CUR／ANI 光标、素材文件夹、INF、ZIP 或 EXE 安装器。"; return }
         importing = true; saveStatus = "正在导入主题…"
         let scoped = url.startAccessingSecurityScopedResource()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { () -> GalleryTheme in
+            let result = Result { () -> [GalleryTheme] in
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return !directory && (ext == "gallery" || ext == "cape") ? try ThemeFiles.load(url) : try WindowsThemeImport.load(url)
+                return !directory && (ext == "gallery" || ext == "cape") ? [try ThemeFiles.load(url)] : try WindowsThemeImport.candidates(url)
             }
             DispatchQueue.main.async {
                 guard let self else { return }; self.importing = false
                 switch result {
                 case .success(let imported):
-                    self.installTheme(imported)
-                    self.message = "已加入主题橱窗。打开卡片可编辑角色；在主题菜单中选择「使用此主题」启用。"
+                    if imported.count > 1 || imported.contains(where: ImportSelection.hasAlternatives) {
+                        self.importReview = ThemeImportReview(themes: imported); self.saveStatus = "等待选择导入素材"
+                    } else if let theme = imported.first {
+                        self.installTheme(theme)
+                        self.message = "已加入主题橱窗。打开卡片可编辑角色；在主题菜单中选择「使用此主题」启用。"
+                    }
+                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
+                }
+            }
+        }
+    }
+    func cancelImportReview() {
+        importReview = nil
+        if saveStatus == "等待选择导入素材" { saveStatus = "已保存在本机" }
+    }
+    func confirmImportReview(_ inputs: [GalleryTheme]) {
+        guard !importing, !inputs.isEmpty, library.count + inputs.count <= 200 else {
+            message = "请至少选择一套主题；主题目录最多保留 200 套。"; return
+        }
+        saveNow(); importReview = nil; importing = true; libraryRevision += 1
+        var names = Set(library.map(\.name))
+        let imports = inputs.map { input -> (GalleryTheme, LibraryTheme) in
+            var value = input, suffix = 2
+            while names.contains(value.name) { value.name = input.name + " (\(suffix))"; suffix += 1 }
+            names.insert(value.name); return (value, LibraryTheme(theme: value))
+        }
+        let rows = library, root = self.root, index = indexURL
+        saveQueue.async { [weak self] in
+            let result = Result { () -> [LibraryTheme] in
+                let oldIndex = try Data(contentsOf: index)
+                let compatibility = root.appendingPathComponent("current.gallery")
+                let oldCurrent = try? Data(contentsOf: compatibility)
+                var created: [URL] = [], added: [LibraryTheme] = []
+                do {
+                    for (theme, row) in imports {
+                        let url = root.appendingPathComponent("Themes/" + row.id + ".gallery")
+                        try ThemeFiles.save(theme, to: url); created.append(url)
+                        added.append(ThemeLibrary.thumbnails(id: row.id, theme: theme, previous: nil))
+                    }
+                    try ThemeLibrary.saveIndex(rows + added, at: index)
+                    try Data(contentsOf: created[0]).write(to: compatibility, options: .atomic)
+                    return added
+                } catch {
+                    for url in created { try? FileManager.default.removeItem(at: url) }
+                    try? oldIndex.write(to: index, options: .atomic)
+                    if let oldCurrent { try? oldCurrent.write(to: compatibility, options: .atomic) }
+                    throw error
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }; self.importing = false
+                switch result {
+                case .success(let added):
+                    self.library = rows + added; self.theme = imports[0].0; self.selectedThemeID = added[0].id
+                    self.selectedRole = self.theme.roles[0].id; self.selectedMotion = .normal; self.saveStatus = "已保存在本机"
+                    if self.selectionDefaults { UserDefaults.standard.set(added[0].id, forKey: "currentThemeID") }
+                    self.message = "已导入所选 \(added.count) 套主题。"
                 case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
                 }
             }
@@ -444,7 +534,7 @@ final class GalleryStore: ObservableObject {
     }
     func setThemeScale(_ value: Double) {
         guard value.isFinite else { return }
-        let value = min(3, max(0.5, value))
+        let value = min(3, max(0.25, value))
         guard theme.pointerScale != value else { return }
         theme.pointerScale = value
         // Browsing another collection must not resize the applied theme.
@@ -453,7 +543,7 @@ final class GalleryStore: ObservableObject {
     }
     func setRoleScale(_ value: Double, for identifier: String? = nil) {
         guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
-        let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.5, value))
+        let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.25, value))
         guard theme.roles.contains(where: { CursorCatalog.family($0.id) == family && $0.scale != value }) else { return }
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].scale = value }
         if activeThemeID == selectedThemeID { runtime.setRoleScale(value, for: theme.roles[index].id) }
@@ -467,14 +557,24 @@ final class GalleryStore: ObservableObject {
         if activeThemeID == selectedThemeID { runtime.setRoleIdleDelay(value, for: identifier) }
         changed()
     }
+    func setDefaultIdleDelay(_ value: Double) {
+        guard !editingActiveTheme, value.isFinite else { return }
+        let delay = min(600, max(1, value.rounded()))
+        guard theme.idleDelay != delay else { return }
+        theme.idleDelay = delay; changed()
+    }
+    func setAppearance(_ value: CursorAppearance) {
+        guard !editingActiveTheme, theme.appearance != value else { return }
+        theme.appearance = value; changed()
+    }
     func setUsesNative(_ value: Bool) {
-        guard !runtime.enabled, let index = roleIndex else { return }
+        guard !editingActiveTheme, let index = roleIndex else { return }
         let family = CursorCatalog.family(theme.roles[index].id)
         for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].usesNative = value }
         changed()
     }
     func useTemplate(_ role: CursorRole, sourceName: String) {
-        guard !runtime.enabled else { return }
+        guard !editingActiveTheme else { return }
         do { try ThemeLibrary.applyTemplate(role, sourceName: sourceName, to: selectedRole, in: &theme); changed() }
         catch { message = error.localizedDescription }
     }
@@ -529,7 +629,7 @@ final class GalleryStore: ObservableObject {
         }
     }
     func importFrames(append: Bool) {
-        guard !runtime.enabled else { return }
+        guard !editingActiveTheme else { return }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .data]; panel.allowsMultipleSelection = true
         panel.message = "选择 PNG 帧序列、GIF、CUR 或 ANI；多文件按文件名排序。"
         guard panel.runModal() == .OK else { return }
@@ -552,5 +652,4 @@ final class GalleryStore: ObservableObject {
         } catch { message = error.localizedDescription }
     }
     func resetDemo() { installTheme(Demo.makeTheme()) }
-    func importPRTS() { openTheme() }
 }

@@ -13,12 +13,23 @@ final class SystemSceneMonitor {
     private var dockPIDs = Set<pid_t>()
     private var managerPIDs = Set<pid_t>()
     private(set) var missionControl = false
+    private var windowOwners: [CGWindowID: (dock: Bool, checked: Double)] = [:]
     func isDockWindow(_ id: CGWindowID) -> Bool {
-        guard id != 0, let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]],
+        guard id != 0 else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let cached = windowOwners[id], now - cached.checked < 2 { return cached.dock }
+        guard let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]],
               let pid = rows.first?[kCGWindowOwnerPID as String] as? NSNumber else { return false }
-        // Queried only on button-down; do not scan windows on mouse movement.
-        let pids = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").map(\.processIdentifier)
-        return pids.contains(pid.int32Value)
+        // Window IDs are stable across repeated clicks. Cache metadata briefly;
+        // an uncached owner is still checked synchronously before shell clicks.
+        let dock = dockPIDs.contains(pid.int32Value)
+            || NSRunningApplication(processIdentifier: pid.int32Value)?.bundleIdentifier == "com.apple.dock"
+        if windowOwners.count >= 64 {
+            windowOwners = windowOwners.filter { now - $0.value.checked < 2 }
+            if windowOwners.count >= 64 { windowOwners.removeAll(keepingCapacity: true) }
+        }
+        windowOwners[id] = (dock, now)
+        return dock
     }
     #if GALLERY_RUNTIME_CHECKS
     var testOverride: Bool?

@@ -15,6 +15,7 @@ final class CursorRuntime: ObservableObject {
     private let renderer = SystemCursorRenderer()
     private var originals: [String: [String: Any]] = [:]
     private var normal: [String: [String: Any]] = [:]
+    private var normalVisualClips: [String: CursorClip] = [:]
     private var recognition: CursorRecognition?
     private var recognizing = false
     private var generation = 0
@@ -61,17 +62,87 @@ final class CursorRuntime: ObservableObject {
     private var lastProbe = 0.0
     private var lastSeed: Int32 = -1
     private var pointerScale = 1.0
+    private let registrationQueue = DispatchQueue(label: "Gallery.cursor-size", qos: .userInitiated)
+    private var pendingRegistration: DispatchWorkItem?
+    private var registrationRevision = 0
+    private var dirtyRegistrationIDs = Set<String>()
     private var recoveryOverride: URL?
     init(recoveryURL: URL? = nil) { recoveryOverride = recoveryURL }
     func setScale(_ value: Double) {
         guard value.isFinite else { return }
-        pointerScale = min(3, max(0.5, value)); registeredMatch = false; render()
+        pointerScale = min(3, max(0.25, value)); registeredMatch = false; render(); scheduleNext(); scheduleSizeRegistration()
     }
     func setRoleScale(_ value: Double, for identifier: String) {
         guard value.isFinite, roles[identifier] != nil else { return }
         let family = CursorCatalog.family(identifier)
-        for id in roles.keys where CursorCatalog.family(id) == family { roles[id]?.scale = min(3, max(0.5, value)) }
-        registeredMatch = false; render()
+        for id in roles.keys where CursorCatalog.family(id) == family { roles[id]?.scale = min(3, max(0.25, value)) }
+        registeredMatch = false; render(); scheduleNext(); scheduleSizeRegistration(family: family)
+    }
+    private func scheduleSizeRegistration(family: String? = nil) {
+        guard enabled, let theme else { return }
+        dirtyRegistrationIDs.formUnion(normal.keys.filter { family == nil || CursorCatalog.family($0) == family })
+        pendingRegistration?.cancel(); registrationRevision += 1
+        let revision = registrationRevision, currentGeneration = generation, scale = pointerScale
+        let selected = roles.values.filter { dirtyRegistrationIDs.contains($0.id) }
+        let smoothing = theme.appearance.smoothEdges
+        let task = DispatchWorkItem { [weak self] in
+            let result = Result { () -> ([String: [String: Any]], [String: CursorClip], [String: Double]) in
+                var base: [String: [String: Any]] = [:], visuals: [String: CursorClip] = [:], scales: [String: Double] = [:]
+                var encoded: [(CursorClip, [String: Any])] = []
+                for role in selected {
+                    let factor = scale * role.scale
+                    var clip = role.clip(.normal)!.scaled(by: factor).alignedToPixels()
+                    visuals[role.id] = clip; scales[role.id] = factor
+                    if clip.frames.count > 1 && !CursorCatalog.isResize(role.id) { clip.frames = [clip.frames[0]] }
+                    if let cached = encoded.first(where: { $0.0 == clip }) { base[role.id] = cached.1 }
+                    else {
+                        let dictionary = try CursorImages.capeDictionary(clip, smoothEdges: smoothing)
+                        encoded.append((clip, dictionary)); base[role.id] = dictionary
+                    }
+                }
+                return (base, visuals, scales)
+            }
+            DispatchQueue.main.async {
+                guard let self, self.enabled, self.generation == currentGeneration, self.registrationRevision == revision else { return }
+                switch result {
+                case .success(let resources): self.commitSizes(resources, generation: currentGeneration, revision: revision)
+                case .failure(let error): self.error = error.localizedDescription
+                }
+            }
+        }
+        pendingRegistration = task
+        registrationQueue.asyncAfter(deadline: .now() + 0.12, execute: task)
+    }
+    private func commitSizes(_ resources: ([String: [String: Any]], [String: CursorClip], [String: Double]), generation: Int, revision: Int) {
+        guard enabled, self.generation == generation, registrationRevision == revision else { return }
+        // Continuous slider movement gets immediate cached geometry. Publish
+        // the final native resources after the gesture, without interrupting
+        // a press/release animation or doing PNG work on its event callback.
+        guard !machine.buttonDown, machine.motion == .normal || machine.motion == .idle else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.commitSizes(resources, generation: generation, revision: revision)
+            }; return
+        }
+        let seedBefore = GLCursorBridge.cursorSeed()
+        let continueCurrentRole = roleID != nil && (renderer.owns(seed: seedBefore) || seedBefore == lastSeed)
+        let updated = normal.merging(resources.0, uniquingKeysWith: { _, new in new })
+        normalVisualClips.merge(resources.1, uniquingKeysWith: { _, new in new })
+        renderer.configureNativeNormals(updated, visualClips: normalVisualClips, smoothEdges: theme?.appearance.smoothEdges ?? true)
+        for id in resources.0.keys.sorted() {
+            let code = GLCursorBridge.updateCursor(resources.0[id]!, identifier: id, refresh: false)
+            guard code == 0 else { fail(ThemeError.invalid("更新光标大小失败：\(id)，错误 \(code)。")); return }
+        }
+        normal = updated; registeredScales.merge(resources.2, uniquingKeysWith: { _, new in new })
+        recognition?.updateRegistered(updated)
+        dirtyRegistrationIDs.subtract(resources.0.keys)
+        pendingRegistration = nil; registeredMatch = false
+        // Disabling background updates while registering can expose the
+        // foreground application's cached arrow. It is our registration
+        // handoff, not a new role selection. Resume the already identified
+        // image before the recognizer observes that intermediate picture.
+        lastSeed = continueCurrentRole ? GLCursorBridge.cursorSeed() : -1
+        if continueCurrentRole { render() } else { updateIdentification() }
+        scheduleNext()
     }
     func setShakeEnabled(_ value: Bool) { shakeEnabled = value; shake.reset(); render(); scheduleNext() }
     #if GALLERY_RUNTIME_CHECKS
@@ -102,6 +173,7 @@ final class CursorRuntime: ObservableObject {
         acceptObservation(seed: seed, found: CursorIdentification(roles: ids), generation: generation, revision: roleRevision)
     }
     var testRole: String? { roleID }
+    var testThemeName: String? { theme?.name }
     var testEffectiveIdleDelay: Double { idleDelay }
     func testScene(_ value: Bool?) { scenes.testOverride = value; scenes.check(force: true) }
     func testRoleScale(_ id: String) -> Double? { roles[id]?.scale }
@@ -140,6 +212,11 @@ final class CursorRuntime: ObservableObject {
         }
         do {
             try theme.validate()
+            let sourceRoles = Dictionary(uniqueKeysWithValues: theme.roles.map { ($0.id, $0) })
+            var appearance = CursorAppearanceRenderer(theme.appearance)
+            for index in theme.roles.indices where !theme.roles[index].usesNative {
+                theme.roles[index].clips = try theme.roles[index].clips.mapValues { try appearance.render($0) }
+            }
             pointerScale = theme.pointerScale
             guard GLCursorBridge.available() else { throw ThemeError.invalid("此系统未提供所需光标接口。编辑器仍可使用。") }
             guard !hasRecovery else { throw ThemeError.invalid("存在上次未完成的恢复记录。请先恢复上次光标。") }
@@ -152,14 +229,17 @@ final class CursorRuntime: ObservableObject {
                 matcher.addRepresentations(old, role: role.id)
                 backup[role.id] = old
                 if !role.usesNative {
-                    var clip = role.clip(.normal)!.scaled(by: pointerScale * role.scale)
+                    var clip = role.clip(.normal)!.scaled(by: pointerScale * role.scale).alignedToPixels()
                     visualClips[role.id] = clip
                     // Foreground apps reselect IBeam on every cursor-region
                     // update. An animated registered resource restarts then;
                     // Gallery owns the continuous clock and cached frame loop.
                     if clip.frames.count > 1 && !CursorCatalog.isResize(role.id) { clip.frames = [clip.frames[0]] }
-                    base[role.id] = try CursorImages.capeDictionary(clip)
+                    base[role.id] = try CursorImages.capeDictionary(clip, smoothEdges: theme.appearance.smoothEdges)
                     matcher.add(role.clip(.normal)!, role: role.id, applied: true)
+                    if theme.appearance.shadow, let source = sourceRoles[role.id]?.clip(.normal) {
+                        matcher.add(source, role: role.id, applied: false)
+                    }
                 }
             }
             guard !base.isEmpty || theme.roles.contains(where: \.usesNative) else { throw ThemeError.invalid("未能备份对应系统光标，未进行替换。") }
@@ -171,12 +251,17 @@ final class CursorRuntime: ObservableObject {
                 try data.write(to: journalURL, options: .atomic)
             }
             originals = backup; normal = base; self.theme = theme
+            normalVisualClips = visualClips; dirtyRegistrationIDs.removeAll()
             roles = Dictionary(uniqueKeysWithValues: theme.roles.map { ($0.id, $0) })
             registeredScales = Dictionary(uniqueKeysWithValues: theme.roles.map { ($0.id, pointerScale * $0.scale) })
             canonicalRoles = Dictionary(uniqueKeysWithValues: theme.roles.map { role in
-                (role.id, theme.roles.first(where: { CursorCatalog.family($0.id) == CursorCatalog.family(role.id) })!.id)
+                let family = theme.roles.filter { CursorCatalog.family($0.id) == CursorCatalog.family(role.id) }
+                // A named system alias may be unavailable on a particular OS.
+                // Resolve to an entry we actually backed up/prepared, instead
+                // of silencing the entire family because its first ID failed.
+                return (role.id, family.first(where: { base[$0.id] != nil || $0.usesNative })?.id ?? role.id)
             })
-            renderer.configureNativeNormals(base, visualClips: visualClips)
+            renderer.configureNativeNormals(base, visualClips: visualClips, smoothEdges: theme.appearance.smoothEdges)
             if let arrow = theme.roles.first(where: { CursorCatalog.isArrow($0.id) }) {
                 for motion in [Motion.release, .hold] {
                     if let clip = prepared?.clip(role: arrow.id, motion: motion) {
@@ -184,11 +269,19 @@ final class CursorRuntime: ObservableObject {
                     }
                 }
             }
-            if let text = theme.roles.first(where: { $0.id == "com.apple.coregraphics.IBeam" }),
+            if let text = theme.roles.first(where: { CursorCatalog.family($0.id) == "com.apple.coregraphics.IBeam" && base[$0.id] != nil }),
                let clip = prepared?.clip(role: text.id, motion: .normal), clip.frames.count > 1 {
                 renderer.warmInteraction(clip, role: text.id, motion: .normal, scale: pointerScale * text.scale, limit: 96)
             }
-            recognition = CursorRecognition(matcher: matcher); generation += 1
+            // Prime distinct click frames, including text. Repeated copies
+            // of the same image must not consume the entire warm-up budget.
+            var warmed = Set<String>()
+            for role in theme.roles where base[role.id] != nil && warmed.insert(CursorCatalog.family(role.id)).inserted {
+                if let clip = prepared?.clip(role: role.id, motion: .press) {
+                    renderer.warmInteraction(clip, role: role.id, motion: .press, scale: pointerScale * role.scale, limit: 4)
+                }
+            }
+            recognition = CursorRecognition(matcher: matcher, registered: base); generation += 1
             if !base.isEmpty { _ = GLCursorBridge.clearCoreCursorCache() }
             for id in base.keys.sorted() {
                 let code = GLCursorBridge.updateCursor(base[id]!, identifier: id, refresh: false)
@@ -222,6 +315,7 @@ final class CursorRuntime: ObservableObject {
     }
     @discardableResult
     func stop() -> Bool {
+        pendingRegistration?.cancel(); pendingRegistration = nil; registrationRevision += 1
         timer?.invalidate(); timer = nil; observation.stop(); scenes.onChange = nil; generation += 1; recognizing = false; recognition = nil
         if let activity { ProcessInfo.processInfo.endActivity(activity) }; activity = nil
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }; workspaceObservers.removeAll()
@@ -239,6 +333,7 @@ final class CursorRuntime: ObservableObject {
             originals.removeAll(); status = "已停用 · 已恢复启用前的光标"
         } else { error = "部分光标恢复失败，恢复记录已保留。请再次恢复，必要时注销登录。"; status = "需要恢复光标" }
         roleAliases.removeAll(); roles.removeAll(); canonicalRoles.removeAll(); normal.removeAll(); prepared = nil
+        normalVisualClips.removeAll(); dirtyRegistrationIDs.removeAll()
         roleID = nil; theme = nil; registeredMatch = false; registeredScales.removeAll(); shake.reset()
         machine.reset(now: now); lastProbe = 0; lastSeed = -1; dockGesture = false
         return failures.isEmpty
@@ -275,7 +370,7 @@ final class CursorRuntime: ObservableObject {
         let recoveryStarted = machine.motionStartedAt
         var recovery = renderer.nativeRecoveryImages
         recovery?.releasing = machine.motion == .release
-        recognition.probe(pendingImage: pending?.fingerprint, nativeImages: renderer.nativeGuardFingerprints,
+        recognition.probe(pendingImage: pending?.fingerprint, nativeImages: renderer.nativeGuardFingerprints, nativeAnimation: renderer.nativeAnimationImages,
                           nativeRecovery: recovery) { [weak self] seed, found, ownImage, recoveryIndex in
             DispatchQueue.main.async {
                 if ownImage {
@@ -472,7 +567,7 @@ final class CursorRuntime: ObservableObject {
         let nativeNormal = clip.frames.count == 1 || CursorCatalog.isResize(role.id)
         if registeredMatch && motion == .normal && nativeNormal && magnification == 1
             && abs(scale - (registeredScales[role.id] ?? -1)) < 0.005 && !renderer.owns(seed: currentSeed) {
-            let geometry = clip.clip.scaled(by: scale)
+            let geometry = clip.clip.scaled(by: scale).alignedToPixels()
             renderer.passThrough(frame: clip.frames[0].data, size: CGSize(width: geometry.width, height: geometry.height))
         } else {
             let started = motion == .normal ? normalClocks.start(for: CursorCatalog.family(role.id), suggested: machine.motionStartedAt, now: now) : machine.motionStartedAt
@@ -535,7 +630,7 @@ final class CursorRuntime: ObservableObject {
             #endif
             if type == .leftMouseDown {
                 lastLeftDown = timestamp
-                dockGesture = observed && scenes.isDockWindow(observation.latestWindowID)
+                dockGesture = theme.clickEnabled && observed && scenes.isDockWindow(observation.latestWindowID)
                 normalClocks.reset()
                 machine.down(now: timestamp, pressDuration: currentRole?.clip(.press)?.duration, enabled: theme.clickEnabled,
                     split: currentRole?.splitClickAnimation ?? false, releaseDuration: currentRole?.clip(.release)?.duration)

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Version 2 stores identical PNGs once. A complete PRTS theme contains many
+/// Version 2 stores identical PNGs once. A complete animated theme contains many
 /// system aliases and repeated ANI frames; embedding those bytes per role made
 /// a portable theme needlessly large. Version 1 remains readable.
 struct ThemeArchive: Codable {
@@ -9,6 +9,7 @@ struct ThemeArchive: Codable {
     var name: String
     var author: String
     var pointerScale: Double?
+    var appearance: CursorAppearance?
     var coverFrame: String?
     var idleDelay: Double
     var idleEnabled: Bool
@@ -38,14 +39,18 @@ struct ThemeArchive: Codable {
         var hotY: Double
     }
     init(_ theme: GalleryTheme) {
-        name = theme.name; author = theme.author; idleDelay = theme.idleDelay; pointerScale = theme.pointerScale
+        name = theme.name; author = theme.author; idleDelay = theme.idleDelay; pointerScale = theme.pointerScale; appearance = theme.appearance
         idleEnabled = theme.idleEnabled; clickEnabled = theme.clickEnabled; excludedBundleIDs = theme.excludedBundleIDs
         var pool: [String: Data] = [:]
+        var frameKeys: [Data: String] = [:]
+        func imageKey(_ data: Data) -> String {
+            if let cached = frameKeys[data] { return cached }
+            let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            frameKeys[data] = key; pool[key] = data
+            return key
+        }
         func archive(_ clip: CursorClip) -> Clip {
-            let keys = clip.frames.map { data -> String in
-                let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                pool[key] = data; return key
-            }
+            let keys = clip.frames.map(imageKey)
             return Clip(frames: keys, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
         }
         roles = theme.roles.map { role in
@@ -56,8 +61,7 @@ struct ThemeArchive: Codable {
                         clips: clips, variants: variants.isEmpty ? nil : variants, selectedVariants: role.selectedVariants.isEmpty ? nil : role.selectedVariants)
         }
         if let cover = theme.coverFrame {
-            let key = SHA256.hash(data: cover).map { String(format: "%02x", $0) }.joined()
-            pool[key] = cover; coverFrame = key
+            coverFrame = imageKey(cover)
         } else { coverFrame = nil }
         images = pool
     }
@@ -80,6 +84,7 @@ struct ThemeArchive: Codable {
         }
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
         theme.pointerScale = pointerScale ?? 1
+        theme.appearance = appearance ?? CursorAppearance()
         if let coverFrame {
             guard let cover = images[coverFrame] else { throw ThemeError.invalid("主题缺少封面图像。") }
             theme.coverFrame = cover

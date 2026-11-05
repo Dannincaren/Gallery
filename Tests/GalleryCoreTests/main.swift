@@ -22,6 +22,20 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("ZIP64, legacy Chinese names, streaming, CRC rejection and ZIP self-extractors", imports.testZIP64LegacyNamesStreamingCRCAndSelfExtractor),
+    ("configured theme sets in folders, Unicode ZIP and direct UTF-16 INF", imports.testConfiguredSetsInFolderZIPAndDirectINF),
+    ("appearance regenerates covers and role previews without changing source", regression.testAppearanceInvalidatesPersistedPreviews),
+    ("single-file .NET bundles, compressed assemblies, ZIP and direct CUR/ANI", imports.testSingleFileManagedBundlesCompressedAndDirectCursors),
+    ("fingerprint threshold boundaries and shared observation sample", regression.testFingerprintThresholdBoundariesAndObservationReuse),
+    ("live raster frame order, Retina scales and resource bounds", imports.testLiveRasterLayoutScaleAndBounds),
+    ("system pixel alignment keeps source geometry and exact resolution grids", regression.testSystemPixelAlignmentKeepsSourceGeometry),
+    ("import choices preserve edits, aliases and required normal material", imports.testImportChoicesKeepEditsAliasesAndRequiredNormals),
+    ("Inno groups cursor sets and rejects links and oversized assets", imports.testInnoGroupingFilteringAndBounds),
+    ("registered thin raster identification across 1x/2x/3x", imports.testRegisteredRasterIdentificationIsAppliedAtEveryScale),
+    ("appearance shadow cache, hotspot padding, sampling, archive and legacy defaults", regression.testAppearanceCacheGeometryArchiveAndSharpSampling),
+    ("2 GB package limit and mapped large installer", imports.testTwoGBPackageLimitAndMappedLargeInstaller),
+    ("mixed packages ignore wallpaper, icons and unrelated installers", imports.testMixedBundlesImportOnlyCursorAssets),
+    ("ZIP installer streams to disk with unrelated INF", imports.testZIPStreamsInstallerWithUnrelatedConfiguration),
     ("per-theme overall size, legacy archives and cape geometry", regression.testThemeScaleArchivesLegacyAndCape),
     ("ANI whole-file size compatibility with strict chunk bounds", imports.testANIWholeFileSizeCompatibilityAndTruncation),
     ("gallery default/custom cover snapshots, portable archive and legacy cache", regression.testGalleryCoverUsesArrowFirstFrameAndLegacyCache),
@@ -68,14 +82,14 @@ var checks: [(String, () throws -> Void)] = [
     ("portable archive deduplication and overrides", regression.testArchiveDeduplicatesAndPreservesOverrides),
     ("known-unknown-known cursor recovery", regression.testUnknownDoesNotPoisonLaterKnownMatch)
 ]
-if ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"] != nil {
-    checks.append(("real PRTS resource extraction, ANI and cape conversion", imports.testRealPRTSOptionalIntegration))
-} else { print("SKIP real PRTS integration (set GALLERY_PRTS_EXE to a locally downloaded installer)") }
+if (ProcessInfo.processInfo.environment["GALLERY_RESOURCE_EXE"] ?? ProcessInfo.processInfo.environment["GALLERY_PRTS_EXE"]) != nil {
+    checks.append(("real managed resource extraction, ANI and cape conversion", imports.testRealManagedResourceOptionalIntegration))
+} else { print("SKIP optional local resource integration (set GALLERY_RESOURCE_EXE to a local installer)") }
 if ProcessInfo.processInfo.environment["GALLERY_WINDOWS_EXE"] != nil {
-    checks.append(("real mon3tr EXE and ZIP preserve all embedded cursor assets", imports.testRealWindowsEXEOptionalIntegration))
+    checks.append(("real Windows EXE and ZIP preserve all embedded cursor assets", imports.testRealWindowsEXEOptionalIntegration))
 }
-if ProcessInfo.processInfo.environment["GALLERY_ANGELINA_DIRECTORY"] != nil {
-    checks.append(("real Angelina folder imports all ANI assets without changing frames", imports.testRealAngelinaDirectoryOptionalIntegration))
+if (ProcessInfo.processInfo.environment["GALLERY_CURSOR_DIRECTORY"] ?? ProcessInfo.processInfo.environment["GALLERY_ANGELINA_DIRECTORY"]) != nil {
+    checks.append(("real local cursor folder preserves all ANI assets", imports.testRealCursorDirectoryOptionalIntegration))
 }
 for (name, check) in checks {
     do { try check(); print("PASS \(name)") }
