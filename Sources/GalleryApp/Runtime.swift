@@ -89,7 +89,7 @@ final class CursorRuntime: ObservableObject {
         pendingRegistration?.cancel(); registrationRevision += 1
         let revision = registrationRevision, currentGeneration = generation, scale = pointerScale
         let selected = roles.values.filter { dirtyRegistrationIDs.contains($0.id) }
-        let smoothing = theme.appearance.smoothEdges
+        let smoothing = theme.appearance.effectiveSmoothEdges
         let task = DispatchWorkItem { [weak self] in
             let result = Result { () -> ([String: [String: Any]], [String: CursorClip], [String: Double]) in
                 var base: [String: [String: Any]] = [:], visuals: [String: CursorClip] = [:], scales: [String: Double] = [:]
@@ -132,7 +132,7 @@ final class CursorRuntime: ObservableObject {
         let continueCurrentRole = roleID != nil && (renderer.owns(seed: seedBefore) || seedBefore == lastSeed)
         let updated = normal.merging(resources.0, uniquingKeysWith: { _, new in new })
         normalVisualClips.merge(resources.1, uniquingKeysWith: { _, new in new })
-        renderer.configureNativeNormals(updated, visualClips: normalVisualClips, smoothEdges: theme?.appearance.smoothEdges ?? true)
+        renderer.configureNativeNormals(updated, visualClips: normalVisualClips, smoothEdges: theme?.appearance.effectiveSmoothEdges ?? true)
         for id in resources.0.keys.sorted() {
             let code = GLCursorBridge.updateCursor(resources.0[id]!, identifier: id, refresh: false)
             guard code == 0 else { fail(ThemeError.invalid(L("更新光标大小失败：\(id)，错误 \(code)。"))); return }
@@ -240,7 +240,7 @@ final class CursorRuntime: ObservableObject {
                     // update. An animated registered resource restarts then;
                     // Gallery owns the continuous clock and cached frame loop.
                     if clip.frames.count > 1 && !CursorCatalog.isResize(role.id) { clip.frames = [clip.frames[0]] }
-                    base[role.id] = try CursorImages.capeDictionary(clip, smoothEdges: theme.appearance.smoothEdges)
+                    base[role.id] = try CursorImages.capeDictionary(clip, smoothEdges: theme.appearance.effectiveSmoothEdges)
                     matcher.add(role.clip(.normal)!, role: role.id, applied: true)
                     if theme.appearance.shadow, let source = sourceRoles[role.id]?.clip(.normal) {
                         matcher.add(source, role: role.id, applied: false)
@@ -266,7 +266,7 @@ final class CursorRuntime: ObservableObject {
                 // of silencing the entire family because its first ID failed.
                 return (role.id, family.first(where: { base[$0.id] != nil || $0.usesNative })?.id ?? role.id)
             })
-            renderer.configureNativeNormals(base, visualClips: visualClips, smoothEdges: theme.appearance.smoothEdges)
+            renderer.configureNativeNormals(base, visualClips: visualClips, smoothEdges: theme.appearance.effectiveSmoothEdges)
             if let arrow = theme.roles.first(where: { CursorCatalog.isArrow($0.id) }) {
                 for motion in [Motion.release, .hold] {
                     if let clip = prepared?.clip(role: arrow.id, motion: motion) {

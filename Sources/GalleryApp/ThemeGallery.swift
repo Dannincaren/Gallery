@@ -56,12 +56,6 @@ struct ThemeGallery<Actions: View>: View {
                         .help(query.isEmpty ? L("直接拖动卡片调整顺序") : L("清空搜索后调整主题顺序"))
                         .accessibilityIdentifier("reorder-themes")
                     Spacer()
-                    if let active = store.activeThemeName {
-                        HStack(spacing: 7) {
-                            Circle().fill(.green).frame(width: 6, height: 6)
-                            Text(L("正在使用 · \(active)")).lineLimit(1)
-                        }.font(.callout).foregroundStyle(.secondary)
-                    } else { Text(L("自定义光标已停用")).font(.callout).foregroundStyle(.secondary) }
                 }
                 if reordering {
                     Text(L("直接拖动卡片调整顺序，松手后自动保存。"))
@@ -184,7 +178,7 @@ struct ThemeShowcaseCard<Actions: View>: View {
             .overlay(alignment: .topTrailing) {
                 Group {
                     if GalleryLocalization.isEnglish {
-                        Text("IN\nUSE").font(.system(size: 10, weight: .semibold))
+                        Text("I\nN\n \nU\nS\nE").font(.system(size: 10, weight: .semibold))
                             .multilineTextAlignment(.center).lineSpacing(3)
                     } else {
                         VStack(spacing: 3) {
@@ -247,7 +241,7 @@ struct ThemeShowcaseCard<Actions: View>: View {
                 RoundedRectangle(cornerRadius: 13)
                     .fill(Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.025))
                 if let arrow, let image = EditorImageCache.image(arrow) {
-                    Image(nsImage: image).resizable().interpolation(theme.appearance?.smoothEdges == false ? .none : .high).scaledToFit()
+                    Image(nsImage: image).resizable().interpolation(theme.appearance?.effectiveSmoothEdges == false ? .none : .high).scaledToFit()
                         .frame(width: 80, height: 80).shadow(color: .black.opacity(0.09), radius: 4, y: 4)
                 } else {
                     Image(systemName: "cursorarrow").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(.tertiary)

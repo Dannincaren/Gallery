@@ -50,7 +50,7 @@ public enum ThemeLibrary {
         }
         func key(_ frame: Data, _ clip: CursorClip) -> String {
             var hash = SHA256(); hash.update(data: frame)
-            hash.update(data: Data("\(theme.appearance.smoothEdges):\(theme.appearance.shadow):\(clip.width):\(clip.height)".utf8))
+            hash.update(data: Data("\(theme.appearance.effectiveSmoothEdges):\(theme.appearance.shadow):\(clip.width):\(clip.height)".utf8))
             return previewVersion + hash.finalize().map { String(format: "%02x", $0) }.joined()
         }
         func thumbnail(_ frame: Data, _ clip: CursorClip, maximum: Int) -> Data? {
@@ -62,8 +62,8 @@ public enum ThemeLibrary {
             let pixelsWide = max(1, Int((width * scale).rounded())), pixelsHigh = max(1, Int((height * scale).rounded()))
             guard let context = CGContext(data: nil, width: pixelsWide, height: pixelsHigh, bitsPerComponent: 8, bytesPerRow: pixelsWide * 4,
                 space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-            context.interpolationQuality = theme.appearance.smoothEdges ? .high : .none
-            context.setShouldAntialias(theme.appearance.smoothEdges)
+            context.interpolationQuality = theme.appearance.effectiveSmoothEdges ? .high : .none
+            context.setShouldAntialias(theme.appearance.effectiveSmoothEdges)
             if theme.appearance.shadow {
                 context.setShadow(offset: CGSize(width: 0, height: -scale), blur: 1.5 * scale, color: CGColor(gray: 0, alpha: 0.32))
             }

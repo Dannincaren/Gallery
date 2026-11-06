@@ -5,22 +5,24 @@
   <p>Windows 光标导入 · 点按与待机动画 · 热点和逐帧编辑 · 主题橱窗</p>
   <p><b>简体中文</b> · <a href="README.en.md">English</a></p>
   <p>
-    <a href="https://github.com/Danningcarer/Gallery/releases/latest"><img src="https://img.shields.io/github/v/release/Danningcarer/Gallery?style=flat-square&label=release" alt="最新版本"></a>
+    <a href="https://github.com/Dannincaren/Gallery/releases/latest"><img src="https://img.shields.io/github/v/release/Dannincaren/Gallery?style=flat-square&label=release" alt="最新版本"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-555?style=flat-square" alt="macOS 14 及以上">
     <img src="https://img.shields.io/badge/Apple_Silicon_%26_Intel-Universal-555?style=flat-square" alt="Apple 芯片与 Intel 通用应用">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-noncommercial-76634c?style=flat-square" alt="非商业许可"></a>
   </p>
-  <p><a href="https://github.com/Danningcarer/Gallery/releases/latest"><b>下载最新版</b></a> · <a href="#quick-start">快速开始</a> · <a href="https://github.com/Danningcarer/Gallery/issues/new/choose">反馈问题</a></p>
+  <p><a href="https://github.com/Dannincaren/Gallery/releases/latest"><b>下载最新版</b></a> · <a href="#quick-start">快速开始</a> · <a href="https://github.com/Dannincaren/Gallery/issues/new/choose">反馈问题</a></p>
 </div>
 
-Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展的 macOS 鼠标指针美化与编辑工具。它把常态、待机和按下／按住／松手动画、Windows 素材导入以及可视化编辑放在同一个应用里。界面支持**简体中文和英文，自动跟随 macOS 的语言偏好**，也支持系统的按应用语言设置。
+Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展的 macOS 鼠标指针美化与编辑工具。它把常态、待机和按下／按住／松手动画、Windows 素材导入以及可视化编辑放在同一个应用里。界面支持**简体中文和英文，自动跟随 macOS 的语言偏好**，也可在设置中手动选择简体中文、English 或跟随系统，重新打开后生效。
 
 <a id="quick-start"></a>
 ## 快速开始
 
-1. **安装**：从 [Releases](https://github.com/Danningcarer/Gallery/releases/latest) 下载 `Gallery-macOS.zip`，解压后将 `Gallery.app` 放入「应用程序」。需要 macOS 14 或更新版本，支持 Apple 芯片与 Intel。
+1. **安装**：从 [Releases](https://github.com/Dannincaren/Gallery/releases/latest) 下载 `Gallery-macOS.zip`，解压后将 `Gallery.app` 放入「应用程序」。需要 macOS 14 或更新版本，支持 Apple 芯片与 Intel。
 2. **导入**：点击右上角 **＋** 选择文件或文件夹，也可以拖入窗口。首次打开导入界面会显示完整说明，以后可点击旁边的 **ⓘ** 查看。含多套素材时先勾选需要的套装和版本，按需点预览。
 3. **使用**：单击卡片选中主题，点右上角 **▶** 开始使用。再次点击已选中或正在使用的卡片进入编辑；点 **⏸** 停用并恢复。关闭窗口后仍可从菜单栏控制。
+
+像素主题可在子页面「主题整体大小」上方勾选 **像素风格**，保留清晰边缘。该选项按主题保存，切换主题时自动使用各自设置；保存完成后会更新橱窗封面与角色缩略图。
 
 内置示例由本项目绘制，不需要另外下载素材。只锁定正在使用的主题，暂停它后即可编辑；其他主题可以直接修改。
 
@@ -30,10 +32,10 @@ Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展
 | --- | --- |
 | 动画 | 常态循环、待机、按下、按住、松手；有按住素材就持续播放到松手，各角色可单独设置待机等待时间 |
 | 可视化编辑 | 点选或输入热点，调整尺寸、帧时长，复制／替换／追加／移动／删除当前帧，预览完整动画 |
-| 大小与外观 | 每个主题独立的整体大小和每个角色独立大小，均为 25%–300%；可选抗锯齿与柔和阴影 |
+| 大小与外观 | 每个主题独立的整体大小和每个角色独立大小，均为 25%–300%；可选抗锯齿与柔和阴影，每个主题可独立启用像素风格覆盖平滑 |
 | 主题橱窗 | 静态封面、自选封面帧、搜索、拖动排序、重命名、导出、整套移入废纸篓 |
 | 角色混搭 | 单个角色选用其他主题的素材，或保留原生光标；一个角色的多套素材可自由切换 |
-| 日常使用 | 登录自启动、启动后自动应用、启用时隐藏 Dock 图标、甩动放大、按应用暂停交互动画 |
+| 日常使用 | 登录自启动、启动后自动应用、启用时隐藏 Dock 图标、甩动放大、按应用暂停交互动画；设置中可退出应用和检查更新 |
 
 包括正常、帮助、链接、后台运行、忙、精准／文本选择、移动和各方向调整等角色。Windows 专有角色也会保留为可编辑素材；实际显示哪些角色由 macOS 和前台应用决定。
 
@@ -56,6 +58,7 @@ Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展
 
 - **输入监控**用于只读鼠标事件监听。Gallery 不记录键盘、不拦截点击，不要求辅助功能权限。不开启时使用备用鼠标事件与计数路径，部分应用中的响应可能不同。
 - **主题留在本机**。应用不上传导入的光标素材，也不需要在线主题服务。
+- **更新检查仅在点击时联网**。通过 GitHub 的公开发行信息查找正式版本，不发送主题素材或账号凭据；新版本需自行下载与安装。
 - **启用前备份，停用时恢复**。正常停止或退出会恢复原光标；崩溃或强退后，重新打开 Gallery 并使用恢复操作。避免同时运行其他自动重应用光标的软件。
 - **兼容性边界**：应用使用私有 macOS 光标接口。部分应用自绘光标、系统安全界面可能保留原生指针，系统更新也可能影响兼容性。
 
@@ -80,7 +83,7 @@ Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展
 <details>
 <summary>外观设置为什么没有立即改变所有缩略图？</summary>
 
-抗锯齿或阴影变更后，封面和角色缩略图会在后台重新生成，源素材不会被改写。旧主题库首次重建可能需要稍等；正在使用的主题需暂停后修改外观，再重新应用。
+像素风格、抗锯齿或阴影变更后，受影响的封面和角色缩略图会在后台重新生成并在保存完成时更新，源素材不会被改写。旧主题库首次重建可能需要稍等；正在使用的主题需暂停后修改外观，再重新应用。
 
 </details>
 
@@ -102,10 +105,12 @@ Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展
 需要 **Xcode 26.2+ 或对应 Command Line Tools**；部署目标为 macOS 14。导入辅助程序首次构建会下载并验证固定版本的依赖，应用运行时不依赖 Homebrew。
 
 ```sh
-git clone https://github.com/Danningcarer/Gallery.git
+git clone https://github.com/Dannincaren/Gallery.git
 cd Gallery
 bash Scripts/check.sh
 bash Scripts/localization-check.sh
+bash Scripts/update-check.sh
+bash Scripts/import-preview-check.sh
 GALLERY_UNIVERSAL=1 bash Scripts/build.sh
 ```
 
@@ -117,7 +122,7 @@ GALLERY_UNIVERSAL=1 bash Scripts/build.sh
 ./dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-欢迎用中文或英文[报告问题、提出建议](https://github.com/Danningcarer/Gallery/issues/new/choose)或提交改进。请提供应用和系统版本、复现步骤，避免上传私人资料或无权分发的素材。开发规范见[贡献说明](CONTRIBUTING.md)，检查入口见[测试说明](Documentation/TESTING.md)，本版变化见[1.0.1 发布说明](Documentation/RELEASE-1.0.1.md)。
+欢迎用中文或英文[报告问题、提出建议](https://github.com/Dannincaren/Gallery/issues/new/choose)或提交改进。请提供应用和系统版本、复现步骤，避免上传私人资料或无权分发的素材。开发规范见[贡献说明](CONTRIBUTING.md)，检查入口见[测试说明](Documentation/TESTING.md)，本版变化见[1.0.2 发布说明](Documentation/RELEASE-1.0.2.md)。
 
 ## 许可与致谢
 

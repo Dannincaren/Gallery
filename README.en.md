@@ -5,22 +5,24 @@
   <p>Windows cursor imports · Click and idle animations · Hotspot and frame editing · Visual theme library</p>
   <p><a href="README.md">简体中文</a> · <b>English</b></p>
   <p>
-    <a href="https://github.com/Danningcarer/Gallery/releases/latest"><img src="https://img.shields.io/github/v/release/Danningcarer/Gallery?style=flat-square&label=release" alt="Latest release"></a>
+    <a href="https://github.com/Dannincaren/Gallery/releases/latest"><img src="https://img.shields.io/github/v/release/Dannincaren/Gallery?style=flat-square&label=release" alt="Latest release"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-555?style=flat-square" alt="macOS 14 and later">
     <img src="https://img.shields.io/badge/Apple_Silicon_%26_Intel-Universal-555?style=flat-square" alt="Universal application for Apple Silicon and Intel">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-noncommercial-76634c?style=flat-square" alt="Noncommercial license"></a>
   </p>
-  <p><a href="https://github.com/Danningcarer/Gallery/releases/latest"><b>Download</b></a> · <a href="#quick-start">Quick start</a> · <a href="https://github.com/Danningcarer/Gallery/issues/new/choose">Report an issue</a></p>
+  <p><a href="https://github.com/Dannincaren/Gallery/releases/latest"><b>Download</b></a> · <a href="#quick-start">Quick start</a> · <a href="https://github.com/Dannincaren/Gallery/issues/new/choose">Report an issue</a></p>
 </div>
 
-Gallery is a macOS cursor customization and editing app built on [Mousecape](https://github.com/alexzielenski/Mousecape). It brings normal and idle loops, press/hold/release animations, Windows cursor imports, and visual editing into one app. The interface supports **English and Simplified Chinese, following macOS language preferences automatically**, including the system's per-app language setting.
+Gallery is a macOS cursor customization and editing app built on [Mousecape](https://github.com/alexzielenski/Mousecape). It brings normal and idle loops, press/hold/release animations, Windows cursor imports, and visual editing into one app. The interface supports **English and Simplified Chinese, following macOS language preferences automatically**, with a Settings option for English, 简体中文, or Follow System. Reopen the app after changing the language.
 
 <a id="quick-start"></a>
 ## Quick start
 
-1. **Install:** Download `Gallery-macOS.zip` from [Releases](https://github.com/Danningcarer/Gallery/releases/latest), unzip it, and move `Gallery.app` to Applications. Requires macOS 14 or later; supports Apple Silicon and Intel.
+1. **Install:** Download `Gallery-macOS.zip` from [Releases](https://github.com/Dannincaren/Gallery/releases/latest), unzip it, and move `Gallery.app` to Applications. Requires macOS 14 or later; supports Apple Silicon and Intel.
 2. **Import:** Click **＋** at the top right to choose a file or folder, or drop one into the window. The complete import guide opens the first time; reopen it with **ⓘ** beside the title. For packages containing multiple sets or variants, choose what to keep and preview materials on demand.
 3. **Apply:** Click a card to select it, then **▶** to start. Click the selected or active card again to edit it. Click **⏸** to stop and restore your cursors. Menu bar controls remain available after closing the window.
+
+For pixel themes, select **Pixel art** above Theme size in the theme editor to keep edges crisp. The choice is saved per theme and follows theme switching automatically. Covers and role thumbnails update when the change has been saved.
 
 The built-in demo is drawn by this project and needs no external artwork. Only the active theme is locked for material editing; stop it to edit. Other themes remain editable.
 
@@ -30,10 +32,10 @@ The built-in demo is drawn by this project and needs no external artwork. Only t
 | --- | --- |
 | Animation | Normal and idle loops, press, hold, and release. Hold assets loop until mouse-up; each role can override its idle delay |
 | Visual editing | Pick or enter hotspots; adjust dimensions and frame timing; duplicate, replace, append, move, or delete the current frame; preview animations |
-| Size and appearance | Independent theme-wide and per-role size, each from 25% to 300%; optional antialiasing and soft shadows |
+| Size and appearance | Independent theme-wide and per-role size, each from 25% to 300%; optional antialiasing and soft shadows, with a per-theme pixel-art override for smoothing |
 | Theme gallery | Static covers, custom cover frames, search, drag reordering, rename, export, and move whole themes to Trash |
 | Role mixing | Use another theme's material for one role, keep a native cursor, or switch between several variants for the same role |
-| Everyday controls | Launch at login, apply on launch, hide the Dock icon while active, shake to enlarge, and pause interactions in selected apps |
+| Everyday controls | Launch at login, apply on launch, hide the Dock icon while active, shake to enlarge, and pause interactions in selected apps; quit and check for updates from Settings |
 
 Roles include normal, help, link, working in background, busy, precision/text selection, move, and directional resize. Windows-only roles remain editable assets. macOS and the foreground app determine which roles are actually displayed.
 
@@ -56,6 +58,7 @@ Outer ZIP/EXE packages can be up to **2 GB**. Individual cursors are limited to 
 
 - **Input Monitoring** enables read-only mouse event listening. Gallery does not record keys, intercept clicks, or require Accessibility permission. Without it, fallback mouse events and counters are used; responsiveness can differ across apps.
 - **Themes stay on your Mac.** The app does not upload imported cursor assets or require an online theme service.
+- **Updates connect only on request.** Check public GitHub release information without sending theme assets or account credentials. Download and install new versions manually.
 - **Back up before applying; restore when stopping.** Stop or quit normally to restore your previous cursors. After a crash or force quit, reopen Gallery and use recovery. Avoid running another automatic cursor-replacement app at the same time.
 - **Compatibility has limits:** Gallery uses private macOS cursor interfaces. Some application-drawn cursors and system security screens may remain native, and macOS updates can affect compatibility.
 
@@ -80,7 +83,7 @@ Stop the active theme before editing material or playing its editor preview. Oth
 <details>
 <summary>Why do appearance changes take a moment to reach thumbnails?</summary>
 
-Changing smoothing or shadows regenerates covers and role thumbnails in the background without modifying the source artwork. An older library can take a moment to rebuild. Stop the active theme before changing its appearance, then apply it again.
+Changing pixel art, smoothing, or shadows regenerates affected covers and role thumbnails in the background and updates them when saving finishes, without modifying the source artwork. An older library can take a moment to rebuild. Stop the active theme before changing its appearance, then apply it again.
 
 </details>
 
@@ -102,10 +105,12 @@ Version 1.0.1 reduces repeated status formatting, temporary scheduling allocatio
 Requires **Xcode 26.2+ or its Command Line Tools**, targeting macOS 14. The import helper downloads and verifies pinned dependencies on its first build. The installed app has no Homebrew runtime dependency.
 
 ```sh
-git clone https://github.com/Danningcarer/Gallery.git
+git clone https://github.com/Dannincaren/Gallery.git
 cd Gallery
 bash Scripts/check.sh
 bash Scripts/localization-check.sh
+bash Scripts/update-check.sh
+bash Scripts/import-preview-check.sh
 GALLERY_UNIVERSAL=1 bash Scripts/build.sh
 ```
 
@@ -117,7 +122,7 @@ Convert a supported Windows cursor package without opening the editor:
 ./dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-[Report bugs or request features](https://github.com/Danningcarer/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.0.1 release notes](Documentation/RELEASE-1.0.1.md).
+[Report bugs or request features](https://github.com/Dannincaren/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.0.2 release notes](Documentation/RELEASE-1.0.2.md).
 
 ## License and credits
 

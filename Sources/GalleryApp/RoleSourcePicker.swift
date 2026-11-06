@@ -29,7 +29,7 @@ struct RoleSourcePicker: View {
                     Picker(L("光标角色"), selection: $roleID) { ForEach(roles) { Text($0.localizedName).tag($0.id) } }
                     if let role = roles.first(where: { $0.id == roleID }), let frame = role.clip(.normal)?.frames.first,
                        let image = EditorImageCache.image(frame) {
-                        Image(nsImage: image).resizable().scaledToFit().frame(height: 100).frame(maxWidth: .infinity)
+                        Image(nsImage: image).resizable().interpolation(store.theme.appearance.effectiveSmoothEdges ? .high : .none).scaledToFit().frame(height: 100).frame(maxWidth: .infinity)
                     }
                 }
             }

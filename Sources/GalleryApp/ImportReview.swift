@@ -50,7 +50,7 @@ struct ImportReviewSheet: View {
             .popover(isPresented: Binding(get: { previewID == key }, set: {
                 if !$0 && previewID == key { previewID = nil }
             }), arrowEdge: .trailing) {
-                ImportMaterialPreview(clip: clip, title: variant.localizedName, subtitle: role.localizedName + " · " + motion.title)
+                ImportMaterialPreview(clip: clip, title: variant.localizedName, subtitle: role.localizedName + " · " + motion.title, smoothEdges: review.themes[index].appearance.effectiveSmoothEdges)
                     .id(key)
             }
             .onDisappear { if previewID == key { previewID = nil } }
@@ -78,7 +78,7 @@ struct ImportReviewSheet: View {
                                 })) { EmptyView() }.labelsHidden().accessibilityLabel(L("导入 ") + theme.localizedName)
                                 if let frame = theme.coverFrame ?? theme.roles.first(where: { CursorCatalog.isArrow($0.id) })?.clip(.normal)?.frames.first,
                                    let image = EditorImageCache.image(frame) {
-                                    Image(nsImage: image).resizable().scaledToFit().frame(width: 42, height: 42)
+                                    Image(nsImage: image).resizable().interpolation(theme.appearance.effectiveSmoothEdges ? .high : .none).scaledToFit().frame(width: 42, height: 42)
                                 }
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(theme.localizedName).font(.headline).lineLimit(2)

@@ -21,6 +21,10 @@ jobs:
         run: bash Scripts/check.sh
       - name: Check native English and Chinese localization
         run: bash Scripts/localization-check.sh
+      - name: Check manual updates and pixel material previews
+        run: |
+          bash Scripts/update-check.sh
+          bash Scripts/import-preview-check.sh
       - name: Build Universal application
         env:
           GALLERY_UNIVERSAL: '1'

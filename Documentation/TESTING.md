@@ -34,6 +34,21 @@ bash Scripts/editor-check.sh /tmp/gallery-editor-check
 
 Use a fresh directory. This verifies isolated libraries, per-theme sizes, 25% bounds, drag ordering, pending saves, material variants, mixed/native roles, role aliases, covers, rename and whole-theme deletion. It does not enable cursors, change login items or modify the normal user library.
 
+Pixel-art checks cover independent theme settings, preserved source assets, preview-cache invalidation, deferred automatic saves, and immediate navigation after changing appearance.
+
+## Manual updates and material previews
+
+```sh
+bash Scripts/update-check.sh
+bash Scripts/import-preview-check.sh
+```
+
+The update harness uses local URLProtocol fixtures by default: no automatic requests, single-flight checks, local/stable numeric version comparison, offline/HTTP failures and cancellation. An explicit `bash Scripts/update-check.sh --live` performs an anonymous read of the official repository's latest stable release. Repository identity uses the permanent numeric ID, so account or repository renames do not break the request.
+
+The material-preview harness uses generated checkerboard artwork. It verifies nearest-neighbor downsampling in pixel mode, separate smoothing cache entries, bounded image size, rejection of invalid data, and releasing cached frames when the preview closes. Neither check changes system cursors.
+
+`bash Scripts/preferences-check.sh` additionally verifies language selection and relaunch behavior in a disposable preferences domain. It requires a desktop session and permission to write its own test preferences; the normal Gallery preferences are left unchanged.
+
 ## System cursor checks
 
 Stop and quit any running cursor replacement first. These checks temporarily replace system resources and keep an independent recovery journal in the supplied directory. Run them sequentially, with a compatible `.gallery` fixture:

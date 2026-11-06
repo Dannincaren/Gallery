@@ -4,13 +4,20 @@ import Foundation
 /// macOS's per-app language setting. Nothing observes input or polls for locale
 /// changes; macOS relaunches the app after a per-app language change.
 public enum GalleryLocalization {
-    public static let isEnglish = !(Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("zh")
+    private static let language = Bundle.main.preferredLocalizations.first ?? "en"
+    public static let isEnglish = !language.hasPrefix("zh")
+    // Keep one consistent language for this launch. The manual preference uses
+    // macOS's per-app AppleLanguages setting and takes effect on reopening.
+    static let bundle: Bundle = {
+        guard let path = Bundle.main.path(forResource: language, ofType: "lproj"), let bundle = Bundle(path: path) else { return .main }
+        return bundle
+    }()
 
     /// Stored role names and imported filenames are never rewritten. Known
     /// built-in labels are translated only when displayed; unknown names pass
     /// through unchanged.
     public static func label(_ name: String) -> String {
-        Bundle.main.localizedString(forKey: name, value: name, table: nil)
+        bundle.localizedString(forKey: name, value: name, table: nil)
     }
     public static func themeName(_ name: String) -> String {
         name == "Gallery · 光晕" || name == "Windows 光标主题" ? label(name) : name
@@ -20,7 +27,7 @@ public enum GalleryLocalization {
 /// String.LocalizationValue retains interpolations for native string-table
 /// lookup, including printf specifiers and reordered English arguments.
 public func L(_ key: String.LocalizationValue) -> String {
-    String(localized: key, bundle: .main)
+    String(localized: key, bundle: GalleryLocalization.bundle)
 }
 
 extension CursorRole {

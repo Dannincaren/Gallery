@@ -19,7 +19,7 @@ struct RoleSizePreview: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.25))
                 if let display, let data = display.frames.first, let image = EditorImageCache.image(data) {
-                    Image(nsImage: image).resizable().interpolation(appearance.smoothEdges ? .high : .none)
+                    Image(nsImage: image).resizable().interpolation(appearance.effectiveSmoothEdges ? .high : .none)
                         .frame(width: display.width, height: display.height)
                 }
             }.frame(width: 136, height: 136)

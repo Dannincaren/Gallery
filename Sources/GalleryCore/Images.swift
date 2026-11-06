@@ -151,7 +151,7 @@ public enum ThemeFiles {
         var appearance = CursorAppearanceRenderer(theme.appearance)
         let cursors = try Dictionary(uniqueKeysWithValues: selected.map { role in
             (role.id, try CursorImages.capeDictionary(appearance.render(role.clip(.normal)!).scaled(by: theme.pointerScale * role.scale),
-                                                   smoothEdges: theme.appearance.smoothEdges))
+                                                   smoothEdges: theme.appearance.effectiveSmoothEdges))
         })
         let dictionary: [String: Any] = ["CapeName": theme.name, "Author": theme.author,
             "Identifier": "local.gallery.export", "CapeVersion": 1.0, "Version": 2.0,

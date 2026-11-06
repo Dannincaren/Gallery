@@ -5,14 +5,16 @@ import GalleryCore
 /// Owned by one open popover. Decode only requested frames, with a small local
 /// cache; large source bitmaps are downsampled before they become display images.
 actor ImportPreviewFrames {
-    private var images: [Data: CGImage] = [:]
-    private var order: [Data] = []
+    private struct Key: Hashable { let data: Data; let smoothEdges: Bool }
+    private var images: [Key: CGImage] = [:]
+    private var order: [Key] = []
     private var bytes = 0
 
-    func image(_ data: Data) -> CGImage? {
+    func image(_ data: Data, smoothEdges: Bool = true) -> CGImage? {
         guard !Task.isCancelled else { return nil }
-        if let image = images[data] {
-            order.removeAll { $0 == data }; order.append(data)
+        let key = Key(data: data, smoothEdges: smoothEdges)
+        if let image = images[key] {
+            order.removeAll { $0 == key }; order.append(key)
             return image
         }
         return autoreleasepool {
@@ -20,18 +22,34 @@ actor ImportPreviewFrames {
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
                   let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
-                  width > 0, height > 0,
-                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  width > 0, height > 0, width <= 16384, height <= 16384, width * height <= 32_000_000 else { return nil }
+            let decoded: CGImage?
+            if smoothEdges {
+                decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceThumbnailMaxPixelSize: min(384, max(width, height)),
                     kCGImageSourceShouldCacheImmediately: true
-                  ] as CFDictionary), !Task.isCancelled else { return nil }
+                ] as CFDictionary)
+            } else if let original = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                if max(width, height) <= 384 { decoded = original }
+                else {
+                    let scale = 384.0 / Double(max(width, height))
+                    let outputWidth = max(1, Int((Double(width) * scale).rounded()))
+                    let outputHeight = max(1, Int((Double(height) * scale).rounded()))
+                    if let context = CGContext(data: nil, width: outputWidth, height: outputHeight, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                        context.interpolationQuality = .none; context.setShouldAntialias(false)
+                        context.draw(original, in: CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight))
+                        decoded = context.makeImage()
+                    } else { decoded = nil }
+                }
+            } else { decoded = nil }
+            guard let image = decoded, !Task.isCancelled else { return nil }
             let cost = image.bytesPerRow * image.height
             while !order.isEmpty && (order.count >= 16 || bytes + cost > 4 * 1024 * 1024) {
                 let oldest = order.removeFirst()
                 if let removed = images.removeValue(forKey: oldest) { bytes -= removed.bytesPerRow * removed.height }
             }
-            images[data] = image; order.append(data); bytes += cost
+            images[key] = image; order.append(key); bytes += cost
             return image
         }
     }
@@ -42,6 +60,7 @@ struct ImportMaterialPreview: View {
     let clip: CursorClip
     let title: String
     let subtitle: String
+    var smoothEdges = true
     @Environment(\.dismiss) private var dismiss
     @State private var frames = ImportPreviewFrames()
     @State private var image: CGImage?
@@ -110,7 +129,7 @@ struct ImportMaterialPreview: View {
                 }
             }.clipShape(RoundedRectangle(cornerRadius: 10))
             if let image {
-                Image(decorative: image, scale: 1).resizable().interpolation(.high)
+                Image(decorative: image, scale: 1).resizable().interpolation(smoothEdges ? .high : .none)
                     .aspectRatio(clip.width / clip.height, contentMode: .fit).padding(20)
             } else if failed {
                 Label(L("无法预览此素材"), systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
@@ -120,7 +139,7 @@ struct ImportMaterialPreview: View {
         .accessibilityLabel(L("素材效果预览"))
         .task(id: active && visible ? index : nil) {
             guard active, visible, clip.frames.indices.contains(index) else { return }
-            let next = await frames.image(clip.frames[index])
+            let next = await frames.image(clip.frames[index], smoothEdges: smoothEdges)
             guard !Task.isCancelled else { return }
             if let next { image = next; failed = false }
             else { image = nil; failed = true }

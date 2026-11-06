@@ -11,6 +11,41 @@ struct EditorHarness {
         while store.importing && Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         try verify(!store.importing, "目录操作超时")
     }
+    static func checkPixelAppearance(at root: URL, role: CursorRole) throws {
+        let folder = root.appendingPathComponent("Themes")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let themes = ["Pixel A", "Smooth B"].map { GalleryTheme(name: $0, roles: [role]) }
+        let rows = themes.map { ThemeLibrary.thumbnails(id: UUID().uuidString, theme: $0, previous: nil) }
+        for (theme, row) in zip(themes, rows) { try ThemeFiles.save(theme, to: folder.appendingPathComponent(row.id + ".gallery")) }
+        try ThemeLibrary.saveIndex(rows, at: root.appendingPathComponent("themes.json"))
+        let store = GalleryStore(rootURL: root); store.saveNow(wait: true)
+        let original = store.theme.roles
+        store.setAppearance(CursorAppearance(smoothEdges: true, pixelArt: true)); store.saveNow(wait: true)
+        let saved = try ThemeFiles.load(folder.appendingPathComponent(rows[0].id + ".gallery"))
+        let index = try ThemeLibrary.loadIndex(at: root.appendingPathComponent("themes.json"))
+        try verify(saved.appearance.pixelArt && saved.appearance.smoothEdges && !saved.appearance.effectiveSmoothEdges && saved.roles == original,
+            "像素开关未保存、改变了源素材或清除了原来的平滑选择")
+        try verify(index[0].appearance == saved.appearance && index[0].coverKey != rows[0].coverKey && index[0].roles[0].thumbnailKey != rows[0].roles[0].thumbnailKey,
+            "像素开关未刷新封面、角色预览或目录的渲染规则")
+        store.selectTheme(rows[1].id); try waitFor(store)
+        try verify(!store.theme.appearance.pixelArt && store.theme.appearance.effectiveSmoothEdges, "像素规则串到另一个主题")
+        store.selectTheme(rows[0].id); try waitFor(store)
+        try verify(store.theme.appearance == saved.appearance, "切换主题丢失像素设置")
+        store.setAppearance(CursorAppearance(smoothEdges: true)); store.saveNow(wait: true)
+        try verify(store.library[0].coverKey == rows[0].coverKey, "关闭像素风格后未恢复原来的平滑预览")
+        // Exercise the actual deferred UI save, rather than just saveNow(wait:).
+        store.setAppearance(CursorAppearance(smoothEdges: true, pixelArt: true))
+        let until = Date().addingTimeInterval(5)
+        while store.saveStatus != L("已保存在本机") && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        try verify(store.saveStatus == L("已保存在本机") && store.library[0].coverKey == index[0].coverKey && store.library[0].roles[0].thumbnailKey == index[0].roles[0].thumbnailKey,
+            "自动保存后橱窗或角色预览没有及时刷新")
+        store.setAppearance(CursorAppearance(smoothEdges: true)); store.saveIfNeeded()
+        store.selectTheme(rows[1].id); try waitFor(store)
+        let latest = try ThemeLibrary.loadIndex(at: root.appendingPathComponent("themes.json"))
+        try verify(store.library[0].coverKey == rows[0].coverKey && latest[0].coverKey == rows[0].coverKey && latest[0].appearance?.pixelArt == false,
+            "更改后立即返回目录或切换主题丢失了刚保存的预览")
+        print("PASS per-theme pixel persistence, source isolation, deferred preview refresh and immediate navigation")
+    }
     static func checkThemeSizes(at root: URL, role: CursorRole) throws {
         let themes = root.appendingPathComponent("Themes")
         try FileManager.default.createDirectory(at: themes, withIntermediateDirectories: true)
@@ -126,6 +161,7 @@ struct EditorHarness {
             let clip = CursorClip(frames: [png, png])
             let first = CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])
             let legacy = GalleryTheme(name: "Legacy", roles: [first])
+            try checkPixelAppearance(at: root.appendingPathComponent("PixelAppearance"), role: first)
             try checkThemeSizes(at: root.appendingPathComponent("SizeIsolation"), role: first)
             try checkThemeOrder(at: root.appendingPathComponent("ThemeOrdering"), role: first)
             try ThemeFiles.save(legacy, to: root.appendingPathComponent("current.gallery"))

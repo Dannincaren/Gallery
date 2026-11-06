@@ -3,6 +3,47 @@ import AppKit
 import GalleryCore
 
 final class RegressionTests {
+    func testPixelArtOverridesSmoothingAcrossPreviewsAndExport() throws {
+        let bytes: [UInt8] = [0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255]
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        let bitmap = CGImage(width: 2, height: 2, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let data = try CursorImages.png(bitmap)
+        let clip = CursorClip(frames: [data, data], frameDuration: 0.12, width: 17, height: 17, hotX: 3, hotY: 4)
+        var theme = GalleryTheme(name: "Pixel", roles: [CursorRole(id: "com.apple.coregraphics.Arrow", name: "Arrow", clips: ["normal": clip])])
+        let id = UUID().uuidString, smooth = ThemeLibrary.thumbnails(id: id, theme: theme, previous: nil)
+        theme.appearance.pixelArt = true
+        expectEqual(theme.appearance.smoothEdges, true)
+        expectEqual(theme.appearance.effectiveSmoothEdges, false)
+        let pixel = ThemeLibrary.thumbnails(id: id, theme: theme, previous: smooth)
+        expectFalse(pixel.coverKey == smooth.coverKey)
+        expectFalse(pixel.roles[0].thumbnailKey == smooth.roles[0].thumbnailKey)
+        expectEqual(ThemeLibrary.thumbnails(id: id, theme: theme, previous: pixel), pixel)
+        var sharp = theme; sharp.appearance = CursorAppearance(smoothEdges: false)
+        let sharpPreview = ThemeLibrary.thumbnails(id: id, theme: sharp, previous: nil)
+        expectEqual(pixel.cover, sharpPreview.cover); expectEqual(pixel.roles[0].thumbnail, sharpPreview.roles[0].thumbnail)
+        let aligned = clip.scaled(by: 1.85).alignedToPixels()
+        expectFalse(try CursorImages.capeDictionary(aligned, smoothEdges: true)["Representations"] as! [Data] ==
+                    CursorImages.capeDictionary(aligned, smoothEdges: false)["Representations"] as! [Data])
+        expectEqual(try CursorImages.capeDictionary(aligned, smoothEdges: theme.appearance.effectiveSmoothEdges)["Representations"] as! [Data],
+                    try CursorImages.capeDictionary(aligned, smoothEdges: false)["Representations"] as! [Data])
+        var pixelShadow = CursorAppearanceRenderer(CursorAppearance(shadow: true, pixelArt: true))
+        var sharpShadow = CursorAppearanceRenderer(CursorAppearance(smoothEdges: false, shadow: true))
+        expectEqual(try pixelShadow.render(clip), try sharpShadow.render(clip))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = root.appendingPathComponent("pixel.gallery"), cape = root.appendingPathComponent("pixel.cape")
+        try ThemeFiles.save(theme, to: archive); expectEqual(try ThemeFiles.load(archive), theme)
+        try ThemeFiles.exportCape(theme, to: cape); try ThemeFiles.exportCape(sharp, to: archive.appendingPathExtension("cape"))
+        expectEqual(try ThemeFiles.load(cape).roles, try ThemeFiles.load(archive.appendingPathExtension("cape")).roles)
+        let legacy = try JSONDecoder().decode(CursorAppearance.self, from: Data(#"{"smoothEdges":false,"shadow":true}"#.utf8))
+        expectEqual(legacy, CursorAppearance(smoothEdges: false, shadow: true))
+        expectEqual(theme.roles[0].clip(.normal), clip)
+        theme.appearance.pixelArt = false
+        expectEqual(theme.appearance.effectiveSmoothEdges, true)
+    }
     func testAppearanceInvalidatesPersistedPreviews() throws {
         let context = CGContext(data: nil, width: 97, height: 97, bitsPerComponent: 8, bytesPerRow: 388,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!

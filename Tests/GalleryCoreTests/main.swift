@@ -22,6 +22,8 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("pixel art overrides smoothing in cached previews, shadow, export and legacy archives", regression.testPixelArtOverridesSmoothingAcrossPreviewsAndExport),
+    ("stable update metadata, trusted release URLs and local version ordering", ReleaseTests().testStableReleaseAndLocalVersionComparison),
     ("ZIP64, legacy Chinese names, streaming, CRC rejection and ZIP self-extractors", imports.testZIP64LegacyNamesStreamingCRCAndSelfExtractor),
     ("configured theme sets in folders, Unicode ZIP and direct UTF-16 INF", imports.testConfiguredSetsInFolderZIPAndDirectINF),
     ("appearance regenerates covers and role previews without changing source", regression.testAppearanceInvalidatesPersistedPreviews),

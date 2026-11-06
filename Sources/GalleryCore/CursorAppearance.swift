@@ -4,8 +4,17 @@ import AppKit
 public struct CursorAppearance: Codable, Equatable, Sendable {
     public var smoothEdges = true
     public var shadow = false
-    public init(smoothEdges: Bool = true, shadow: Bool = false) {
-        self.smoothEdges = smoothEdges; self.shadow = shadow
+    public var pixelArt = false
+    public var effectiveSmoothEdges: Bool { smoothEdges && !pixelArt }
+    public init(smoothEdges: Bool = true, shadow: Bool = false, pixelArt: Bool = false) {
+        self.smoothEdges = smoothEdges; self.shadow = shadow; self.pixelArt = pixelArt
+    }
+    private enum CodingKeys: String, CodingKey { case smoothEdges, shadow, pixelArt }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        smoothEdges = try values.decodeIfPresent(Bool.self, forKey: .smoothEdges) ?? true
+        shadow = try values.decodeIfPresent(Bool.self, forKey: .shadow) ?? false
+        pixelArt = try values.decodeIfPresent(Bool.self, forKey: .pixelArt) ?? false
     }
 }
 
@@ -32,8 +41,8 @@ public struct CursorAppearanceRenderer {
             guard let context = CGContext(data: nil, width: width, height: height,
                 bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw ThemeError.invalid(L("无法创建光标阴影。")) }
-            context.interpolationQuality = appearance.smoothEdges ? .high : .none
-            context.setShouldAntialias(appearance.smoothEdges)
+            context.interpolationQuality = appearance.effectiveSmoothEdges ? .high : .none
+            context.setShouldAntialias(appearance.effectiveSmoothEdges)
             context.setShadow(offset: CGSize(width: 0, height: -scale), blur: 1.5 * scale,
                               color: CGColor(gray: 0, alpha: 0.32))
             context.draw(image, in: CGRect(x: padding * scale, y: padding * scale,
