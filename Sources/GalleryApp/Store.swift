@@ -16,7 +16,7 @@ final class GalleryStore: ObservableObject {
     @Published var message: String?
     @Published var importReview: ThemeImportReview?
     @Published private(set) var importing = false
-    @Published private(set) var saveStatus = "已保存在本机"
+    @Published private(set) var saveStatus = L("已保存在本机")
     @Published private(set) var library: [LibraryTheme] = []
     @Published private(set) var selectedThemeID: String
     @Published private(set) var activeThemeID: String?
@@ -50,7 +50,7 @@ final class GalleryStore: ObservableObject {
         self.trashThemeFile = trashThemeFile ?? { url in
             var trashed: NSURL?
             try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
-            guard let result = trashed as URL? else { throw ThemeError.invalid("主题已移入废纸篓，但未能获取恢复位置。") }
+            guard let result = trashed as URL? else { throw ThemeError.invalid(L("主题已移入废纸篓，但未能获取恢复位置。")) }
             return result
         }
         self.preview = preview
@@ -118,14 +118,14 @@ final class GalleryStore: ObservableObject {
     }
     var activeThemeName: String? {
         guard runtime.enabled, let activeThemeID else { return nil }
-        return library.first(where: { $0.id == activeThemeID })?.name
+        return library.first(where: { $0.id == activeThemeID })?.localizedName
     }
     func isActiveTheme(_ id: String) -> Bool { runtime.enabled && activeThemeID == id }
     var editingActiveTheme: Bool { isActiveTheme(selectedThemeID) }
     func applyCurrentTheme() {
         guard !importing else { return }
         saveNow(wait: true)
-        guard saveStatus == "已保存在本机", runtime.stop() else { return }
+        guard saveStatus == L("已保存在本机"), runtime.stop() else { return }
         runtime.start(theme)
         activeThemeID = runtime.enabled ? selectedThemeID : nil
         if runtime.enabled && selectionDefaults { UserDefaults.standard.set(selectedThemeID, forKey: "lastAppliedThemeID") }
@@ -176,7 +176,7 @@ final class GalleryStore: ObservableObject {
         guard !editingActiveTheme, let index = roleIndex else { return }
         try clip.validate()
         let key = motion.rawValue
-        guard (theme.roles[index].variants[key]?.count ?? 0) < 31 else { throw ThemeError.invalid("每个状态最多保留 32 套素材。") }
+        guard (theme.roles[index].variants[key]?.count ?? 0) < 31 else { throw ThemeError.invalid(L("每个状态最多保留 32 套素材。")) }
         let id = UUID().uuidString
         var role = theme.roles[index]
         role.variants[key, default: []].append(CursorVariant(id: id, name: name, clip: clip))
@@ -186,7 +186,7 @@ final class GalleryStore: ObservableObject {
     func importVariant() {
         guard !editingActiveTheme else { return }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .data]; panel.allowsMultipleSelection = false
-        panel.message = "为「\(selectedMotion.title)」添加另一套素材，保留已有版本。支持 PNG、GIF、CUR、ANI。"
+        panel.message = L("为「\(selectedMotion.title)」添加另一套素材，保留已有版本。支持 PNG、GIF、CUR、ANI。")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try addVariant(AnimationImport.read(url), name: url.lastPathComponent, for: selectedMotion) }
         catch { message = error.localizedDescription }
@@ -218,12 +218,12 @@ final class GalleryStore: ObservableObject {
     }
     func changed() {
         revision += 1; refreshEntry(); pendingSave?.cancel()
-        if saveStatus != "正在保存…" { saveStatus = "正在保存…" }
+        if saveStatus != L("正在保存…") { saveStatus = L("正在保存…") }
         let task = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveNow() } }
         pendingSave = task; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: task)
     }
     func saveIfNeeded() {
-        if pendingSave != nil || saveStatus != "已保存在本机" { saveNow() }
+        if pendingSave != nil || saveStatus != L("已保存在本机") { saveNow() }
     }
     func prepareTheme(_ id: String) {
         cancelThemePreparation()
@@ -256,16 +256,16 @@ final class GalleryStore: ObservableObject {
             return row
         }
         if wait {
-            do { let row = try saveQueue.sync(execute: write); mergeThumbnails(row); saveStatus = "已保存在本机" }
-            catch { saveStatus = "保存失败"; message = error.localizedDescription }
+            do { let row = try saveQueue.sync(execute: write); mergeThumbnails(row); saveStatus = L("已保存在本机") }
+            catch { saveStatus = L("保存失败"); message = error.localizedDescription }
         } else {
             saveQueue.async { [weak self] in
                 let result = Result { try write() }
                 DispatchQueue.main.async {
                     guard let self, self.revision == version else { return }
                     switch result {
-                    case .success(let row): self.mergeThumbnails(row); self.saveStatus = "已保存在本机"
-                    case .failure(let error): self.saveStatus = "保存失败"; self.message = error.localizedDescription
+                    case .success(let row): self.mergeThumbnails(row); self.saveStatus = L("已保存在本机")
+                    case .failure(let error): self.saveStatus = L("保存失败"); self.message = error.localizedDescription
                     }
                 }
             }
@@ -330,7 +330,7 @@ final class GalleryStore: ObservableObject {
                         let positions = Dictionary(uniqueKeysWithValues: previousIDs.enumerated().map { ($0.element, $0.offset) })
                         self.library.sort { (positions[$0.id] ?? Int.max) < (positions[$1.id] ?? Int.max) }
                     }
-                    self.message = "主题顺序保存失败：\(error.localizedDescription)"
+                    self.message = L("主题顺序保存失败：\(error.localizedDescription)")
                 }
             }
         }
@@ -356,7 +356,7 @@ final class GalleryStore: ObservableObject {
                 guard let self else { return }; self.importing = false
                 // The save and load use the same serial queue; its save-result
                 // callback reaches the main queue before this callback.
-                guard self.saveStatus == "已保存在本机" else { return }
+                guard self.saveStatus == L("已保存在本机") else { return }
                 switch result {
                 case .success(let theme):
                     self.theme = theme; self.selectedThemeID = id
@@ -379,7 +379,7 @@ final class GalleryStore: ObservableObject {
     func deleteTheme(_ id: String) {
         guard !preview, !importing, let removed = library.first(where: { $0.id == id }) else { return }
         saveNow(wait: true)
-        guard saveStatus == "已保存在本机" else { return }
+        guard saveStatus == L("已保存在本机") else { return }
         if isActiveTheme(id), !runtime.stop() { return }
         if activeThemeID == id { activeThemeID = nil }
         // Drain previous writes before taking the file out of the library.
@@ -417,7 +417,7 @@ final class GalleryStore: ObservableObject {
                     try? oldCompatibility.write(to: compatibility, options: .atomic)
                     if createsFallback { try? FileManager.default.removeItem(at: fallbackURL) }
                     do { try FileManager.default.moveItem(at: trashed, to: source) }
-                    catch { throw ThemeError.invalid("删除未完成，主题备份位于废纸篓：\(trashed.lastPathComponent)。请重新导入该文件。") }
+                    catch { throw ThemeError.invalid(L("删除未完成，主题备份位于废纸篓：\(trashed.lastPathComponent)。请重新导入该文件。")) }
                     throw error
                 }
                 return (next, selected, rows)
@@ -432,8 +432,8 @@ final class GalleryStore: ObservableObject {
                         UserDefaults.standard.set(selected, forKey: "currentThemeID")
                         if UserDefaults.standard.string(forKey: "lastAppliedThemeID") == id { UserDefaults.standard.removeObject(forKey: "lastAppliedThemeID") }
                     }
-                    self.saveStatus = "已保存在本机"
-                    self.message = "已删除「\(removed.name)」并移入废纸篓。需要找回时，可取出 .gallery 文件重新导入。"
+                    self.saveStatus = L("已保存在本机")
+                    self.message = L("已删除「\(removed.name)」并移入废纸篓。需要找回时，可取出 .gallery 文件重新导入。")
                 case .failure(let error): self.message = error.localizedDescription
                 }
             }
@@ -451,15 +451,15 @@ final class GalleryStore: ObservableObject {
     }
     func openTheme() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.item]; panel.allowsMultipleSelection = false; panel.canChooseDirectories = true
-        panel.message = "支持最高 2 GB 的 ZIP、含光标的 .NET／单文件／Inno Setup EXE，以及 CUR、ANI、光标文件夹、INF、Gallery／Mousecape 主题。多套素材可先勾选；仅提取光标，原文件不会改动。"; panel.prompt = "导入"
+        panel.message = L("支持最高 2 GB 的 ZIP、含光标的 .NET／单文件／Inno Setup EXE，以及 CUR、ANI、光标文件夹、INF、Gallery／Mousecape 主题。多套素材可先勾选；仅提取光标，原文件不会改动。"); panel.prompt = L("导入")
         guard panel.runModal() == .OK, let url = panel.url else { return }; importURL(url)
     }
     func importURL(_ url: URL) {
         guard !importing, importReview == nil else { return }
         let ext = url.pathExtension.lowercased()
         let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-        guard directory || ["gallery", "cape", "zip", "exe", "inf", "cur", "ani"].contains(ext) else { message = "请选择主题文件、CUR／ANI 光标、素材文件夹、INF、ZIP 或 EXE 安装器。"; return }
-        importing = true; saveStatus = "正在导入主题…"
+        guard directory || ["gallery", "cape", "zip", "exe", "inf", "cur", "ani"].contains(ext) else { message = L("请选择主题文件、CUR／ANI 光标、素材文件夹、INF、ZIP 或 EXE 安装器。"); return }
+        importing = true; saveStatus = L("正在导入主题…")
         let scoped = url.startAccessingSecurityScopedResource()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { () -> [GalleryTheme] in
@@ -471,23 +471,23 @@ final class GalleryStore: ObservableObject {
                 switch result {
                 case .success(let imported):
                     if imported.count > 1 || imported.contains(where: ImportSelection.hasAlternatives) {
-                        self.importReview = ThemeImportReview(themes: imported); self.saveStatus = "等待选择导入素材"
+                        self.importReview = ThemeImportReview(themes: imported); self.saveStatus = L("等待选择导入素材")
                     } else if let theme = imported.first {
                         self.installTheme(theme)
-                        self.message = "已加入主题橱窗。打开卡片可编辑角色；在主题菜单中选择「使用此主题」启用。"
+                        self.message = L("已加入主题橱窗。打开卡片可编辑角色；在主题菜单中选择「使用此主题」启用。")
                     }
-                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
+                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = L("导入失败")
                 }
             }
         }
     }
     func cancelImportReview() {
         importReview = nil
-        if saveStatus == "等待选择导入素材" { saveStatus = "已保存在本机" }
+        if saveStatus == L("等待选择导入素材") { saveStatus = L("已保存在本机") }
     }
     func confirmImportReview(_ inputs: [GalleryTheme]) {
         guard !importing, !inputs.isEmpty, library.count + inputs.count <= 200 else {
-            message = "请至少选择一套主题；主题目录最多保留 200 套。"; return
+            message = L("请至少选择一套主题；主题目录最多保留 200 套。"); return
         }
         saveNow(); importReview = nil; importing = true; libraryRevision += 1
         var names = Set(library.map(\.name))
@@ -524,10 +524,10 @@ final class GalleryStore: ObservableObject {
                 switch result {
                 case .success(let added):
                     self.library = rows + added; self.theme = imports[0].0; self.selectedThemeID = added[0].id
-                    self.selectedRole = self.theme.roles[0].id; self.selectedMotion = .normal; self.saveStatus = "已保存在本机"
+                    self.selectedRole = self.theme.roles[0].id; self.selectedMotion = .normal; self.saveStatus = L("已保存在本机")
                     if self.selectionDefaults { UserDefaults.standard.set(added[0].id, forKey: "currentThemeID") }
-                    self.message = "已导入所选 \(added.count) 套主题。"
-                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = "导入失败"
+                    self.message = L("已导入所选 \(added.count) 套主题。")
+                case .failure(let error): self.message = error.localizedDescription; self.saveStatus = L("导入失败")
                 }
             }
         }
@@ -587,7 +587,7 @@ final class GalleryStore: ObservableObject {
                 let snapshot = try result.get()
                 let panel = NSSavePanel()
                 panel.nameFieldStringValue = snapshot.name + (cape ? ".cape" : ".gallery")
-                panel.message = cape ? "导出常态光标供 Mousecape 使用；交互动画请保存为 Gallery 主题。" : "保存包含全部动画和交互设置的主题。"
+                panel.message = cape ? L("导出常态光标供 Mousecape 使用；交互动画请保存为 Gallery 主题。") : L("保存包含全部动画和交互设置的主题。")
                 guard panel.runModal() == .OK, let url = panel.url else { return }
                 if cape { try ThemeFiles.exportCape(snapshot, to: url) } else { try ThemeFiles.save(snapshot, to: url) }
             } catch { self.message = error.localizedDescription }
@@ -596,7 +596,7 @@ final class GalleryStore: ObservableObject {
     func renameTheme(_ id: String, to input: String) {
         guard !importing, library.contains(where: { $0.id == id }) else { return }
         let name = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { message = "主题名称不能为空。"; return }
+        guard !name.isEmpty else { message = L("主题名称不能为空。"); return }
         if id == selectedThemeID { theme.name = name; changed(); return }
         saveNow(); libraryRevision += 1; revision += 1; importing = true
         let rows = library, destination = themeURL(id), index = indexURL, read = loadStoredTheme
@@ -622,7 +622,7 @@ final class GalleryStore: ObservableObject {
                 switch result {
                 case .success(let row):
                     if let i = self.library.firstIndex(where: { $0.id == id }) { self.library[i] = row }
-                    self.saveStatus = "已保存在本机"
+                    self.saveStatus = L("已保存在本机")
                 case .failure(let error): self.message = error.localizedDescription
                 }
             }
@@ -631,7 +631,7 @@ final class GalleryStore: ObservableObject {
     func importFrames(append: Bool) {
         guard !editingActiveTheme else { return }
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.image, .data]; panel.allowsMultipleSelection = true
-        panel.message = "选择 PNG 帧序列、GIF、CUR 或 ANI；多文件按文件名排序。"
+        panel.message = L("选择 PNG 帧序列、GIF、CUR 或 ANI；多文件按文件名排序。")
         guard panel.runModal() == .OK else { return }
         do {
             let clips = try panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.map { try AnimationImport.read($0) }

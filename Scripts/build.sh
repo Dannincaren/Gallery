@@ -26,6 +26,10 @@ bash Scripts/build-inno-helper.sh
 app_dir="$PWD/dist/Gallery.app"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Helpers"
 cp "$binary_dir/Gallery" "$app_dir/Contents/MacOS/Gallery"
+cp -R Resources/*.lproj "$app_dir/Contents/Resources/"
+for gallery_table in "$app_dir"/Contents/Resources/*.lproj/*.strings; do
+    plutil -convert binary1 "$gallery_table"
+done
 cp Resources/Info.plist "$app_dir/Contents/Info.plist"
 cp LICENSE THIRD_PARTY_NOTICES.md "$app_dir/Contents/Resources/"
 cp .build/GalleryInno "$app_dir/Contents/Helpers/GalleryInno"

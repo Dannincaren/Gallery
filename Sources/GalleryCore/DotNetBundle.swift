@@ -36,7 +36,7 @@ enum DotNetBundle {
             offset += length; return value
         }
     }
-    private static func invalid() -> ThemeError { .invalid(".NET 单文件封装已损坏、越界或版本尚未支持。") }
+    private static func invalid() -> ThemeError { .invalid(L(".NET 单文件封装已损坏、越界或版本尚未支持。")) }
     static func resources(in data: Data) throws -> [WindowsResources]? {
         guard let marker = data.range(of: signature) else { return nil }
         guard data.starts(with: [0x4d, 0x5a]), marker.lowerBound >= 8 else { throw invalid() }
@@ -69,7 +69,7 @@ enum DotNetBundle {
         for entry in entries {
             if entry.framework && !result.isEmpty { continue }
             guard entry.size > 0, entry.size <= 80_000_000, total <= 160_000_000 - entry.size else {
-                throw ThemeError.invalid("内嵌程序集超过导入大小上限，请导入解压后的光标素材。")
+                throw ThemeError.invalid(L("内嵌程序集超过导入大小上限，请导入解压后的光标素材。"))
             }
             total += entry.size
             let payload = data.subdata(in: entry.offset..<entry.offset + (entry.compressed > 0 ? entry.compressed : entry.size))
@@ -80,9 +80,9 @@ enum DotNetBundle {
             // ReadyToRun bundles can include the same assets twice.
             if identities.contains(where: { $0 == files }) { continue }
             identities.append(files); result.append(resources)
-            guard result.count <= 80 else { throw ThemeError.invalid("内嵌光标套装超过 80 套，请拆分导入。") }
+            guard result.count <= 80 else { throw ThemeError.invalid(L("内嵌光标套装超过 80 套，请拆分导入。")) }
         }
-        guard !result.isEmpty else { throw ThemeError.invalid(".NET 单文件封装中未找到可读取的 CUR／ANI 光标。") }
+        guard !result.isEmpty else { throw ThemeError.invalid(L(".NET 单文件封装中未找到可读取的 CUR／ANI 光标。")) }
         return result
     }
     private static func inflate(_ data: Data, size: Int) throws -> Data {

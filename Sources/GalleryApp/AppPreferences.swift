@@ -1,3 +1,4 @@
+import GalleryCore
 import AppKit
 import Combine
 import ServiceManagement
@@ -36,7 +37,7 @@ final class AppPreferences: ObservableObject {
             refreshLoginStatus()
         } catch {
             refreshLoginStatus()
-            self.error = "未能更改开机自启动。请将 Gallery 放入「应用程序」后再试。\n\(error.localizedDescription)"
+            self.error = L("未能更改开机自启动。请将 Gallery 放入「应用程序」后再试。\n\(error.localizedDescription)")
         }
     }
     func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }

@@ -20,9 +20,12 @@ struct ThemeGallery<Actions: View>: View {
     @State private var lastMoveTime = -Double.infinity
     private let columns = [GridItem(.adaptive(minimum: 208, maximum: 280), spacing: 22)]
     private var themes: [LibraryTheme] {
-        let entries = Dictionary(uniqueKeysWithValues: store.library.map { ($0.id, $0) })
-        let rows = dragOrder.map { $0.compactMap { entries[$0] } } ?? store.library
-        return query.isEmpty ? rows : rows.filter { $0.name.localizedStandardContains(query) }
+        let rows: [LibraryTheme]
+        if let dragOrder {
+            let entries = Dictionary(uniqueKeysWithValues: store.library.map { ($0.id, $0) })
+            rows = dragOrder.compactMap { entries[$0] }
+        } else { rows = store.library }
+        return query.isEmpty ? rows : rows.filter { $0.localizedName.localizedStandardContains(query) }
     }
     var body: some View {
         ScrollView {
@@ -32,7 +35,7 @@ struct ThemeGallery<Actions: View>: View {
                     Spacer()
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("搜索主题", text: $query).textFieldStyle(.plain)
+                        TextField(L("搜索主题"), text: $query).textFieldStyle(.plain)
                         if !query.isEmpty {
                             Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
                         }
@@ -40,28 +43,28 @@ struct ThemeGallery<Actions: View>: View {
                         .background(.quaternary.opacity(0.3), in: Capsule()).frame(width: 230)
                 }
                 HStack {
-                    Text("主题目录").font(.title3.weight(.semibold))
+                    Text(L("主题目录")).font(.title3.weight(.semibold))
                     Text("\(store.library.count)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 8).padding(.vertical, 3).background(.quaternary.opacity(0.45), in: Capsule())
                     Button {
                         reordering.toggle()
                         clearDrag()
                     } label: {
-                        Label(reordering ? "完成排序" : "调整顺序", systemImage: reordering ? "checkmark" : "arrow.up.arrow.down")
+                        Label(reordering ? L("完成排序") : L("调整顺序"), systemImage: reordering ? "checkmark" : "arrow.up.arrow.down")
                     }.buttonStyle(.borderless).font(.callout)
                         .disabled(store.importing || !query.isEmpty || store.library.count < 2)
-                        .help(query.isEmpty ? "直接拖动卡片调整顺序" : "清空搜索后调整主题顺序")
+                        .help(query.isEmpty ? L("直接拖动卡片调整顺序") : L("清空搜索后调整主题顺序"))
                         .accessibilityIdentifier("reorder-themes")
                     Spacer()
                     if let active = store.activeThemeName {
                         HStack(spacing: 7) {
                             Circle().fill(.green).frame(width: 6, height: 6)
-                            Text("正在使用 · \(active)").lineLimit(1)
+                            Text(L("正在使用 · \(active)")).lineLimit(1)
                         }.font(.callout).foregroundStyle(.secondary)
-                    } else { Text("自定义光标已停用").font(.callout).foregroundStyle(.secondary) }
+                    } else { Text(L("自定义光标已停用")).font(.callout).foregroundStyle(.secondary) }
                 }
                 if reordering {
-                    Text("直接拖动卡片调整顺序，松手后自动保存。")
+                    Text(L("直接拖动卡片调整顺序，松手后自动保存。"))
                         .font(.callout).foregroundStyle(.secondary).padding(.top, -15)
                 }
                 if themes.isEmpty {
@@ -127,8 +130,8 @@ struct ThemeGallery<Actions: View>: View {
             VStack(spacing: 13) {
                 Image(systemName: "plus").font(.system(size: 24, weight: .light))
                     .frame(width: 52, height: 52).background(.quaternary.opacity(0.25), in: Circle())
-                Text("导入主题").font(.headline)
-                Text("EXE · 文件夹 · ZIP · Gallery").font(.caption).foregroundStyle(.secondary)
+                Text(L("导入主题")).font(.headline)
+                Text(L("EXE · 文件夹 · ZIP · Gallery")).font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain).aspectRatio(1, contentMode: .fit)
@@ -179,12 +182,18 @@ struct ThemeShowcaseCard<Actions: View>: View {
                 face.offset(lift)
             }
             .overlay(alignment: .topTrailing) {
-                VStack(spacing: 3) {
-                    ForEach(Array("正在使用"), id: \.self) { character in
-                        Text(String(character))
+                Group {
+                    if GalleryLocalization.isEnglish {
+                        Text("IN\nUSE").font(.system(size: 10, weight: .semibold))
+                            .multilineTextAlignment(.center).lineSpacing(3)
+                    } else {
+                        VStack(spacing: 3) {
+                            ForEach(Array("正在使用"), id: \.self) { character in
+                                Text(String(character))
+                            }
+                        }.font(GalleryStatusTypography.italic)
                     }
                 }
-                .font(GalleryStatusTypography.italic)
                 .foregroundStyle(Color(red: 1, green: 0.98, blue: 0.92))
                 .shadow(color: Color.white.opacity(0.72), radius: 1.2)
                 .shadow(color: Color(red: 1, green: 0.97, blue: 0.87).opacity(0.48), radius: 3)
@@ -199,8 +208,8 @@ struct ThemeShowcaseCard<Actions: View>: View {
             .aspectRatio(1, contentMode: .fit).contentShape(Rectangle())
         }
         .buttonStyle(ShowcaseCardButtonStyle())
-        .accessibilityLabel("\(reordering ? "移动主题" : (active || selected ? "打开主题" : "选择主题"))：\(theme.name)")
-        .accessibilityValue(active ? "正在使用" : selected ? "已选中" : "未选中")
+        .accessibilityLabel("\(reordering ? L("移动主题") : (active || selected ? L("打开主题") : L("选择主题")))：\(theme.localizedName)")
+        .accessibilityValue(active ? L("正在使用") : selected ? L("已选中") : L("未选中"))
         .accessibilityIdentifier("theme-card-\(theme.id)")
         .overlay(alignment: .bottomTrailing) {
             Menu { actions() } label: {
@@ -209,7 +218,7 @@ struct ThemeShowcaseCard<Actions: View>: View {
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .padding(.trailing, 43).padding(.bottom, 44).offset(lift)
-            .help("\(theme.name)的主题操作").accessibilityLabel("\(theme.name)的主题操作")
+            .help(L("\(theme.localizedName)的主题操作")).accessibilityLabel(L("\(theme.localizedName)的主题操作"))
             .accessibilityIdentifier("theme-menu-\(theme.id)")
         }
         .opacity(placeholder ? 0.28 : 1)
@@ -245,8 +254,8 @@ struct ThemeShowcaseCard<Actions: View>: View {
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 5) {
-                Text(theme.name).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                Text("\(theme.roles.count) 个角色").font(.caption).foregroundStyle(.secondary)
+                Text(theme.localizedName).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                Text(L("\(theme.roles.count) 个角色")).font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.top, 14).padding(.trailing, 34)
         }
@@ -276,12 +285,12 @@ struct ThemeRenameSheet: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("重命名主题").font(.title2.bold())
-            TextField("主题名称", text: $name).textFieldStyle(.roundedBorder)
+            Text(L("重命名主题")).font(.title2.bold())
+            TextField(L("主题名称"), text: $name).textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("保存名称") { save(name); dismiss() }.keyboardShortcut(.defaultAction)
+                Button(L("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("保存名称")) { save(name); dismiss() }.keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(26).frame(width: 380)
@@ -300,15 +309,15 @@ struct ThemeDeleteSheet: View {
                     Image(nsImage: image).resizable().interpolation(.none).scaledToFit().frame(width: 48, height: 48)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("删除这个主题？").font(.title2.bold())
-                    Text(theme.name).font(.headline).foregroundStyle(.secondary).lineLimit(2)
+                    Text(L("删除这个主题？")).font(.title2.bold())
+                    Text(theme.localizedName).font(.headline).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("移入废纸篓", role: .destructive) { dismiss(); confirm() }.buttonStyle(.borderedProminent).tint(.red)
+                Button(L("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("移入废纸篓"), role: .destructive) { dismiss(); confirm() }.buttonStyle(.borderedProminent).tint(.red)
             }
         }.padding(28).frame(width: 420)
     }

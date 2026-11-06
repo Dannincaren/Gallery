@@ -104,8 +104,8 @@ struct GalleryApp: App {
         }.defaultSize(width: 1120, height: 780)
             .commands {
                 CommandGroup(replacing: .newItem) {
-                    Button("导入主题…") { store.openTheme() }.keyboardShortcut("o")
-                    Button("导出主题…") { store.exportTheme() }.keyboardShortcut("s", modifiers: [.command, .shift])
+                    Button(L("导入主题…")) { store.openTheme() }.keyboardShortcut("o")
+                    Button(L("导出主题…")) { store.exportTheme() }.keyboardShortcut("s", modifiers: [.command, .shift])
                 }
             }
         MenuBarExtra("Gallery", systemImage: "cursorarrow.rays") {
@@ -120,12 +120,12 @@ private struct MenuContents: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Text(runtime.status)
-        Button("打开 Gallery") { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true); store.refreshDockVisibility() }
-        Button(runtime.enabled ? "停用并恢复光标" : "应用当前主题") {
+        Button(L("打开 Gallery")) { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true); store.refreshDockVisibility() }
+        Button(runtime.enabled ? L("停用并恢复光标") : L("应用当前主题")) {
             if runtime.enabled { runtime.stop() } else { store.applyCurrentTheme() }
         }
-        if runtime.hasRecovery && !runtime.enabled { Button("恢复上次光标") { runtime.recover() } }
+        if runtime.hasRecovery && !runtime.enabled { Button(L("恢复上次光标")) { runtime.recover() } }
         Divider()
-        Button("退出 Gallery") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        Button(L("退出 Gallery")) { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }

@@ -1,3 +1,4 @@
+import GalleryCore
 import SwiftUI
 import CoreText
 
@@ -35,7 +36,7 @@ enum SidebarWordmarkStyle: String, CaseIterable, Identifiable {
     case engraved, blackletter, sharp
     var id: String { rawValue }
     var label: String {
-        switch self { case .engraved: return "A · 细刻哥特"; case .blackletter: return "B · 厚重黑字"; case .sharp: return "C · 锐角哥特" }
+        switch self { case .engraved: return L("A · 细刻哥特"); case .blackletter: return L("B · 厚重黑字"); case .sharp: return L("C · 锐角哥特") }
     }
 }
 private struct SidebarWordmarkStyleKey: EnvironmentKey {

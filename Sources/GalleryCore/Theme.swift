@@ -5,11 +5,11 @@ public enum Motion: String, Codable, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .normal: return "常态"
-        case .idle: return "待机"
-        case .press: return "按下"
-        case .hold: return "按住"
-        case .release: return "松手"
+        case .normal: return L("常态")
+        case .idle: return L("待机")
+        case .press: return L("按下")
+        case .hold: return L("按住")
+        case .release: return L("松手")
         }
     }
     public var loops: Bool { self == .normal || self == .idle || self == .hold }
@@ -34,7 +34,7 @@ public struct CursorClip: Codable, Equatable, Sendable {
               frameDuration.isFinite, (1.0 / 240...10).contains(frameDuration),
               width.isFinite, height.isFinite, (1...128).contains(width), (1...128).contains(height),
               hotX.isFinite, hotY.isFinite, hotX >= 0, hotY >= 0, hotX < width, hotY < height else {
-            throw ThemeError.invalid("动画帧、大小或热点超出有效范围。")
+            throw ThemeError.invalid(L("动画帧、大小或热点超出有效范围。"))
         }
     }
     /// Mousecape's existing path accepts at most 24 equally timed frames.
@@ -69,7 +69,7 @@ public struct CursorClip: Codable, Equatable, Sendable {
     }
     @discardableResult
     public mutating func duplicateFrame(at index: Int) throws -> Int {
-        guard frames.indices.contains(index), frames.count < 240 else { throw ThemeError.invalid("无法复制这一帧：最多支持 240 帧。") }
+        guard frames.indices.contains(index), frames.count < 240 else { throw ThemeError.invalid(L("无法复制这一帧：最多支持 240 帧。")) }
         frames.insert(frames[index], at: index + 1)
         return index + 1
     }
@@ -185,24 +185,24 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         guard formatVersion == 1, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !roles.isEmpty, roles.count <= 80, Set(roles.map(\.id)).count == roles.count,
               idleDelay.isFinite, (1...600).contains(idleDelay), pointerScale.isFinite, (0.25...3).contains(pointerScale) else {
-            throw ThemeError.invalid("主题格式、角色或待机时间无效。")
+            throw ThemeError.invalid(L("主题格式、角色或待机时间无效。"))
         }
-        if let coverFrame, coverFrame.isEmpty || coverFrame.count > 8_000_000 { throw ThemeError.invalid("主题封面图像无效或过大。") }
+        if let coverFrame, coverFrame.isEmpty || coverFrame.count > 8_000_000 { throw ThemeError.invalid(L("主题封面图像无效或过大。")) }
         for role in roles {
             if let delay = role.idleDelayOverride, !delay.isFinite || !(1...600).contains(delay) {
-                throw ThemeError.invalid("角色待机等待时间应为 1–600 秒。")
+                throw ThemeError.invalid(L("角色待机等待时间应为 1–600 秒。"))
             }
             guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil, role.scale.isFinite, (0.25...3).contains(role.scale),
                   role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }) else {
-                throw ThemeError.invalid("每个光标必须有常态动画及有效的系统标识。")
+                throw ThemeError.invalid(L("每个光标必须有常态动画及有效的系统标识。"))
             }
             for clip in role.clips.values { try clip.validate() }
             guard role.variants.count <= Motion.allCases.count, role.variants.allSatisfy({ Motion(rawValue: $0.key) != nil && $0.value.count <= 32 }),
                   role.selectedVariants.allSatisfy({ motion, id in role.variants[motion]?.contains(where: { $0.id == id }) == true }) else {
-                throw ThemeError.invalid("素材选项或所选版本无效。")
+                throw ThemeError.invalid(L("素材选项或所选版本无效。"))
             }
             for variants in role.variants.values {
-                guard Set(variants.map(\.id)).count == variants.count else { throw ThemeError.invalid("素材版本标识重复。") }
+                guard Set(variants.map(\.id)).count == variants.count else { throw ThemeError.invalid(L("素材版本标识重复。")) }
                 for variant in variants { try variant.clip.validate() }
             }
         }

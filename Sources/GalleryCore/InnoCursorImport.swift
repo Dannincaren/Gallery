@@ -10,11 +10,11 @@ public enum InnoCursorImport {
     }
     public static func load(_ url: URL, helperURL: URL? = nil) throws -> [GalleryTheme] {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size <= WindowsResources.maximumInstallerBytes else { throw ThemeError.invalid("安装包为空或超过 2 GB。") }
+        guard size > 0, size <= WindowsResources.maximumInstallerBytes else { throw ThemeError.invalid(L("安装包为空或超过 2 GB。")) }
         let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/GalleryInno")
         guard let helper = helperURL ?? (FileManager.default.isExecutableFile(atPath: bundled.path) ? bundled : Bundle.main.url(forResource: "GalleryInno", withExtension: nil, subdirectory: "Helpers")),
               FileManager.default.isExecutableFile(atPath: helper.path) else {
-            throw ThemeError.invalid("已识别为 Inno Setup 安装包，但此应用包缺少解包组件。请使用包含 Inno 支持的完整 Gallery.app，或导入解压后的 CUR／ANI 文件夹。")
+            throw ThemeError.invalid(L("已识别为 Inno Setup 安装包，但此应用包缺少解包组件。请使用包含 Inno 支持的完整 Gallery.app，或导入解压后的 CUR／ANI 文件夹。"))
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Gallery-Inno-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -34,34 +34,34 @@ public enum InnoCursorImport {
         }
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            let reason = String(data: diagnostics, encoding: .utf8) ?? "未知解包错误"
-            throw ThemeError.invalid("Inno Setup 素材提取失败（可能为加密、损坏或尚未支持的版本）。\n" + String(reason.suffix(1600)))
+            let reason = String(data: diagnostics, encoding: .utf8) ?? L("未知解包错误")
+            throw ThemeError.invalid(L("Inno Setup 素材提取失败（可能为加密、损坏或尚未支持的版本）。\n") + String(reason.suffix(1600)))
         }
         return try themes(in: root, packageName: url.deletingPathExtension().lastPathComponent)
     }
     public static func themes(in root: URL, packageName: String) throws -> [GalleryTheme] {
-        guard let iterator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey], options: [.skipsHiddenFiles]) else { throw ThemeError.invalid("无法读取已提取的光标。") }
+        guard let iterator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey], options: [.skipsHiddenFiles]) else { throw ThemeError.invalid(L("无法读取已提取的光标。")) }
         var groups: [URL: [URL]] = [:], configs: [URL] = [], count = 0, bytes = 0
         for case let url as URL in iterator {
             let info = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-            guard info.isSymbolicLink != true else { throw ThemeError.invalid("安装包含有无效的符号链接。") }
+            guard info.isSymbolicLink != true else { throw ThemeError.invalid(L("安装包含有无效的符号链接。")) }
             guard info.isRegularFile == true else { continue }
             let ext = url.pathExtension.lowercased()
             guard ["cur", "ani", "inf"].contains(ext) else { continue }
             let size = info.fileSize ?? 0; bytes += size; count += 1
-            guard size <= 40_000_000, bytes <= 160_000_000, count <= 1000 else { throw ThemeError.invalid("提取的光标素材过多，请拆分套装。") }
+            guard size <= 40_000_000, bytes <= 160_000_000, count <= 1000 else { throw ThemeError.invalid(L("提取的光标素材过多，请拆分套装。")) }
             if ext == "inf" { if size <= 1_000_000 { configs.append(url) }; continue }
             groups[url.deletingLastPathComponent(), default: []].append(url)
         }
-        guard !groups.isEmpty else { throw ThemeError.invalid("安装包中未找到 CUR／ANI 光标；壁纸、应用图标和程序不会导入。") }
-        guard groups.count <= 80 else { throw ThemeError.invalid("安装包中的光标套装超过 80 套，请拆分导入。") }
+        guard !groups.isEmpty else { throw ThemeError.invalid(L("安装包中未找到 CUR／ANI 光标；壁纸、应用图标和程序不会导入。")) }
+        guard groups.count <= 80 else { throw ThemeError.invalid(L("安装包中的光标套装超过 80 套，请拆分导入。")) }
         return try groups.keys.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }.map { directory in
             let cursors = groups[directory]!.sorted { $0.path < $1.path }
             var files: [String: Data] = [:], total = 0
             let infs = configs.filter { $0.deletingLastPathComponent() == directory || $0.deletingLastPathComponent() == directory.deletingLastPathComponent() }
             for url in cursors + infs {
                 let data = try Data(contentsOf: url); total += data.count
-                guard total <= 80_000_000 else { throw ThemeError.invalid("单套光标素材超过 80 MB。") }
+                guard total <= 80_000_000 else { throw ThemeError.invalid(L("单套光标素材超过 80 MB。")) }
                 files[url.lastPathComponent] = data
             }
             var label = directory.lastPathComponent

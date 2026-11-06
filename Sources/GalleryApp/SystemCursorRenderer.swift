@@ -6,6 +6,21 @@ import GalleryNative
 /// submits cached images. This renderer never hides the cursor or moves a window.
 @MainActor
 final class SystemCursorRenderer {
+    private var maximumRasterScale = 2
+    private var screenObserver: NSObjectProtocol?
+    init() {
+        refreshRasterScale()
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshRasterScale() }
+            }
+    }
+    deinit {
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+    }
+    private func refreshRasterScale() {
+        maximumRasterScale = min(3, max(1, Int(ceil(NSScreen.screens.map { $0.backingScaleFactor }.max() ?? 2))))
+    }
     private struct Key: Hashable {
         let role: String, motion: Motion, image: ObjectIdentifier, scale: Int
     }
@@ -175,9 +190,8 @@ final class SystemCursorRenderer {
         return frame
     }
     private func nativeRasters(_ images: [CGImage], geometry: CursorClip) -> [CGImage]? {
-        let backingScale = NSScreen.screens.map { $0.backingScaleFactor }.max() ?? 2
         return try? CursorImages.rasters(images, width: geometry.width, height: geometry.height,
-            smoothEdges: smoothEdges, maximumScale: min(3, max(1, Int(ceil(backingScale)))))
+            smoothEdges: smoothEdges, maximumScale: maximumRasterScale)
     }
     private func nativeResource(_ images: [CGImage], count: Int, geometry: CursorClip) -> GLCursorResource? {
         GLCursorBridge.prepareImages(images, frameCount: UInt(count), frameDuration: geometry.frameDuration,

@@ -1,3 +1,4 @@
+import GalleryCore
 import SwiftUI
 
 /// Unticked continuous track plus a committed, range-checked numeric entry.
@@ -32,8 +33,8 @@ struct NumericSlider: View {
                 TextField("", text: Binding(get: { editing ? draft : String(Int(display.rounded())) }, set: { draft = $0 }))
                     .labelsHidden().textFieldStyle(.plain).multilineTextAlignment(.trailing)
                     .font(.callout.monospacedDigit().weight(.medium)).focused($editing)
-                    .frame(width: 48).onSubmit(commit).accessibilityLabel(title + "数值")
-                    .help("输入 \(Int(limits.lowerBound))–\(Int(limits.upperBound))\(unit)，回车确认")
+                    .frame(width: 48).onSubmit(commit).accessibilityLabel(title + L("数值"))
+                    .help(L("输入 \(Int(limits.lowerBound))–\(Int(limits.upperBound))\(unit)，回车确认"))
                 Text(unit).font(.caption).foregroundStyle(.secondary).fixedSize()
             }.padding(.horizontal, 10).padding(.vertical, 7)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))

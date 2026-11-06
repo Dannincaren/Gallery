@@ -4,7 +4,7 @@ import CryptoKit
 public enum CursorImages {
     public static func png(_ image: CGImage) throws -> Data {
         guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-            throw ThemeError.invalid("无法编码图像。")
+            throw ThemeError.invalid(L("无法编码图像。"))
         }
         return data
     }
@@ -16,7 +16,7 @@ public enum CursorImages {
               let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
               width > 0, height > 0, width <= 16384, height <= 16384, width * height <= 32_000_000,
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            throw ThemeError.invalid("图像无法解码或像素过大。")
+            throw ThemeError.invalid(L("图像无法解码或像素过大。"))
         }
         return image
     }
@@ -25,18 +25,18 @@ public enum CursorImages {
               let count = dictionary["FrameCount"] as? NSNumber, (1...240).contains(count.intValue),
               let width = dictionary["PointsWide"] as? NSNumber,
               let height = dictionary["PointsHigh"] as? NSNumber else {
-            throw ThemeError.invalid("光标缺少有效图像、尺寸或帧数。")
+            throw ThemeError.invalid(L("光标缺少有效图像、尺寸或帧数。"))
         }
         // Keep the highest resolution representation. Logical points preserve
         // the display size and hotspot on both Retina and non-Retina displays.
         let candidates = try reps.map { try bitmap($0) }
         guard let image = candidates.max(by: { $0.width < $1.width }), image.height % count.intValue == 0 else {
-            throw ThemeError.invalid("动画条带高度必须是帧数的整数倍。")
+            throw ThemeError.invalid(L("动画条带高度必须是帧数的整数倍。"))
         }
         let frameHeight = image.height / count.intValue
         let frames = try (0..<count.intValue).map { index -> Data in
             guard let frame = image.cropping(to: CGRect(x: 0, y: index * frameHeight, width: image.width, height: frameHeight)) else {
-                throw ThemeError.invalid("动画裁切失败。")
+                throw ThemeError.invalid(L("动画裁切失败。"))
             }
             return try png(frame)
         }
@@ -64,7 +64,7 @@ public enum CursorImages {
                                smoothEdges: Bool = true, maximumScale: Int = 3) throws -> [CGImage] {
         guard (1...24).contains(images.count), width.isFinite, height.isFinite,
               (1...128).contains(width), (1...128).contains(height), (1...3).contains(maximumScale) else {
-            throw ThemeError.invalid("光标图像、大小或分辨率超出有效范围。")
+            throw ThemeError.invalid(L("光标图像、大小或分辨率超出有效范围。"))
         }
         return try (1...maximumScale).map { scale in
             let pixelsWide = max(1, Int((width * Double(scale)).rounded()))
@@ -73,14 +73,14 @@ public enum CursorImages {
                 bitsPerComponent: 8, bytesPerRow: pixelsWide * 4,
                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                throw ThemeError.invalid("无法创建动画条带。")
+                throw ThemeError.invalid(L("无法创建动画条带。"))
             }
             context.interpolationQuality = smoothEdges ? .high : .none
             context.setShouldAntialias(smoothEdges)
             for (index, image) in images.enumerated() {
                 context.draw(image, in: CGRect(x: 0, y: (images.count - index - 1) * pixelsHigh, width: pixelsWide, height: pixelsHigh))
             }
-            guard let strip = context.makeImage() else { throw ThemeError.invalid("无法创建动画条带。") }
+            guard let strip = context.makeImage() else { throw ThemeError.invalid(L("无法创建动画条带。")) }
             return strip
         }
     }
@@ -106,13 +106,13 @@ public enum CursorImages {
 public enum ThemeFiles {
     public static func load(_ url: URL, legacyPointerScale: Double = 1) throws -> GalleryTheme {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= 80_000_000 else { throw ThemeError.invalid("主题文件超过 80 MB。") }
+        guard size <= 80_000_000 else { throw ThemeError.invalid(L("主题文件超过 80 MB。")) }
         let data = try Data(contentsOf: url)
         var theme: GalleryTheme
         if url.pathExtension.lowercased() == "cape" {
             guard let p = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                   let cursors = p["Cursors"] as? [String: [String: Any]] else {
-                throw ThemeError.invalid("无法读取 Mousecape 主题。")
+                throw ThemeError.invalid(L("无法读取 Mousecape 主题。"))
             }
             let roles = try cursors.keys.sorted().map { key in
                 CursorRole(id: key, name: roleName(key), clips: [Motion.normal.rawValue: try CursorImages.fromCape(cursors[key]!)])
@@ -147,7 +147,7 @@ public enum ThemeFiles {
     public static func exportCape(_ theme: GalleryTheme, to url: URL) throws {
         try theme.validate()
         let selected = theme.roles.filter { !$0.usesNative && !CursorCatalog.assetOnly($0.id) }
-        guard !selected.isEmpty else { throw ThemeError.invalid("没有需要导出的自定义光标。完整设置请保存为 Gallery 主题。") }
+        guard !selected.isEmpty else { throw ThemeError.invalid(L("没有需要导出的自定义光标。完整设置请保存为 Gallery 主题。")) }
         var appearance = CursorAppearanceRenderer(theme.appearance)
         let cursors = try Dictionary(uniqueKeysWithValues: selected.map { role in
             (role.id, try CursorImages.capeDictionary(appearance.render(role.clip(.normal)!).scaled(by: theme.pointerScale * role.scale),

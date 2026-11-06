@@ -61,8 +61,8 @@ struct ImportMaterialPreview: View {
                 }
                 Spacer(minLength: 0)
                 Button { dismiss() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("关闭预览")
-                    .accessibilityLabel("关闭素材预览")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help(L("关闭预览"))
+                    .accessibilityLabel(L("关闭素材预览"))
             }
             if clip.frames.count > 1 {
                 // Only this popover is animated, at most 30 fps. Use elapsed
@@ -76,19 +76,19 @@ struct ImportMaterialPreview: View {
                                 if playing { pausedFrame = index }
                                 else { started = Date().addingTimeInterval(-Double(pausedFrame) * clip.frameDuration) }
                                 playing.toggle()
-                            } label: { Label(playing ? "暂停" : "播放", systemImage: playing ? "pause.fill" : "play.fill") }
+                            } label: { Label(playing ? L("暂停") : L("播放"), systemImage: playing ? "pause.fill" : "play.fill") }
                             Button { pausedFrame = 0; started = Date(); playing = true } label: { Image(systemName: "backward.end.fill") }
-                                .help("重新播放").accessibilityLabel("重新播放素材预览")
+                                .help(L("重新播放")).accessibilityLabel(L("重新播放素材预览"))
                             Spacer()
-                            Text("\(index + 1) / \(clip.frames.count) 帧").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(L("\(index + 1) / \(clip.frames.count) 帧")).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }.controlSize(.small)
                     }
                 }
             } else {
                 canvas(0)
-                Text("静态素材").font(.caption).foregroundStyle(.secondary)
+                Text(L("静态素材")).font(.caption).foregroundStyle(.secondary)
             }
-            Text("\(clip.width, specifier: "%.0f") × \(clip.height, specifier: "%.0f") 点 · \(clip.duration, specifier: "%.2f") 秒")
+            Text(L("\(clip.width, specifier: "%.0f") × \(clip.height, specifier: "%.0f") 点 · \(clip.duration, specifier: "%.2f") 秒"))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
         .padding(16).frame(width: 300)
@@ -113,11 +113,11 @@ struct ImportMaterialPreview: View {
                 Image(decorative: image, scale: 1).resizable().interpolation(.high)
                     .aspectRatio(clip.width / clip.height, contentMode: .fit).padding(20)
             } else if failed {
-                Label("无法预览此素材", systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
+                Label(L("无法预览此素材"), systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
             } else { ProgressView().controlSize(.small) }
         }
         .frame(height: 176)
-        .accessibilityLabel("素材效果预览")
+        .accessibilityLabel(L("素材效果预览"))
         .task(id: active && visible ? index : nil) {
             guard active, visible, clip.frames.indices.contains(index) else { return }
             let next = await frames.image(clip.frames[index])

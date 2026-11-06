@@ -6,7 +6,12 @@ import GalleryNative
 @MainActor
 final class CursorRuntime: ObservableObject {
     @Published private(set) var enabled = false
-    @Published private(set) var status = "未启用 · 编辑与预览不会更改系统光标"
+    @Published private(set) var status = L("未启用 · 编辑与预览不会更改系统光标")
+    private struct StatusKey: Equatable {
+        let role: String, motion: Motion
+        let shell: Bool, native: Bool, shellClick: Bool
+    }
+    private var statusKey: StatusKey?
     @Published var error: String?
     private var theme: GalleryTheme?
     private var roles: [String: CursorRole] = [:]
@@ -130,7 +135,7 @@ final class CursorRuntime: ObservableObject {
         renderer.configureNativeNormals(updated, visualClips: normalVisualClips, smoothEdges: theme?.appearance.smoothEdges ?? true)
         for id in resources.0.keys.sorted() {
             let code = GLCursorBridge.updateCursor(resources.0[id]!, identifier: id, refresh: false)
-            guard code == 0 else { fail(ThemeError.invalid("更新光标大小失败：\(id)，错误 \(code)。")); return }
+            guard code == 0 else { fail(ThemeError.invalid(L("更新光标大小失败：\(id)，错误 \(code)。"))); return }
         }
         normal = updated; registeredScales.merge(resources.2, uniquingKeysWith: { _, new in new })
         recognition?.updateRegistered(updated)
@@ -218,8 +223,8 @@ final class CursorRuntime: ObservableObject {
                 theme.roles[index].clips = try theme.roles[index].clips.mapValues { try appearance.render($0) }
             }
             pointerScale = theme.pointerScale
-            guard GLCursorBridge.available() else { throw ThemeError.invalid("此系统未提供所需光标接口。编辑器仍可使用。") }
-            guard !hasRecovery else { throw ThemeError.invalid("存在上次未完成的恢复记录。请先恢复上次光标。") }
+            guard GLCursorBridge.available() else { throw ThemeError.invalid(L("此系统未提供所需光标接口。编辑器仍可使用。")) }
+            guard !hasRecovery else { throw ThemeError.invalid(L("存在上次未完成的恢复记录。请先恢复上次光标。")) }
             var backup: [String: [String: Any]] = [:], base: [String: [String: Any]] = [:]
             var visualClips: [String: CursorClip] = [:]
             var matcher = CursorMatcher()
@@ -242,7 +247,7 @@ final class CursorRuntime: ObservableObject {
                     }
                 }
             }
-            guard !base.isEmpty || theme.roles.contains(where: \.usesNative) else { throw ThemeError.invalid("未能备份对应系统光标，未进行替换。") }
+            guard !base.isEmpty || theme.roles.contains(where: \.usesNative) else { throw ThemeError.invalid(L("未能备份对应系统光标，未进行替换。")) }
             prepared = try PreparedCursors(roles: theme.roles.filter { base[$0.id] != nil })
             if base.isEmpty { backup.removeAll() }
             if !backup.isEmpty {
@@ -285,7 +290,7 @@ final class CursorRuntime: ObservableObject {
             if !base.isEmpty { _ = GLCursorBridge.clearCoreCursorCache() }
             for id in base.keys.sorted() {
                 let code = GLCursorBridge.updateCursor(base[id]!, identifier: id, refresh: false)
-                guard code == 0 else { throw ThemeError.invalid("光标注册失败：\(id)，错误 \(code)。") }
+                guard code == 0 else { throw ThemeError.invalid(L("光标注册失败：\(id)，错误 \(code)。")) }
             }
             enabled = true; machine.reset(now: now); normalClocks.reset(); suspended = false; locked = false; wasPaused = false
             excluded = theme.excludedBundleIDs.contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "")
@@ -303,10 +308,11 @@ final class CursorRuntime: ObservableObject {
                 self.tick()
             }
             scenes.check(force: true)
-            activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "保持交互光标响应")
+            activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: L("保持交互光标响应"))
             lastLeftEdge = -Double.infinity; lastLeftDown = 0; lastLeftUp = 0; lastWatchdog = now
             lastCornerCheck = 0; tickCount = 0; unknownSince = nil
-            status = "已启用 · 关闭窗口后继续运行"; updateIdentification(); armTimer(after: 0.008)
+            statusKey = nil
+            status = L("已启用 · 关闭窗口后继续运行"); updateIdentification(); armTimer(after: 0.008)
         } catch {
             let message = error.localizedDescription
             if !originals.isEmpty { _ = stop() }
@@ -321,6 +327,7 @@ final class CursorRuntime: ObservableObject {
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }; workspaceObservers.removeAll()
         distributedObservers.forEach { DistributedNotificationCenter.default().removeObserver($0) }; distributedObservers.removeAll()
         enabled = false
+        statusKey = nil
         var failures: [String] = []
         renderer.stop(restoring: roleID.flatMap { originals[$0] })
         if !originals.isEmpty { _ = GLCursorBridge.clearCoreCursorCache() }
@@ -330,8 +337,8 @@ final class CursorRuntime: ObservableObject {
         GLCursorBridge.setDockCursorOverride(false); _ = GLCursorBridge.setBackgroundCursorUpdates(false)
         if failures.isEmpty {
             if !originals.isEmpty { try? FileManager.default.removeItem(at: journalURL) }
-            originals.removeAll(); status = "已停用 · 已恢复启用前的光标"
-        } else { error = "部分光标恢复失败，恢复记录已保留。请再次恢复，必要时注销登录。"; status = "需要恢复光标" }
+            originals.removeAll(); status = L("已停用 · 已恢复启用前的光标")
+        } else { error = L("部分光标恢复失败，恢复记录已保留。请再次恢复，必要时注销登录。"); status = L("需要恢复光标") }
         roleAliases.removeAll(); roles.removeAll(); canonicalRoles.removeAll(); normal.removeAll(); prepared = nil
         normalVisualClips.removeAll(); dirtyRegistrationIDs.removeAll()
         roleID = nil; theme = nil; registeredMatch = false; registeredScales.removeAll(); shake.reset()
@@ -341,7 +348,7 @@ final class CursorRuntime: ObservableObject {
     func recover() {
         guard !enabled else { _ = stop(); return }
         do {
-            guard let backup = try PropertyListSerialization.propertyList(from: Data(contentsOf: journalURL), format: nil) as? [String: [String: Any]], !backup.isEmpty else { throw ThemeError.invalid("恢复记录损坏。") }
+            guard let backup = try PropertyListSerialization.propertyList(from: Data(contentsOf: journalURL), format: nil) as? [String: [String: Any]], !backup.isEmpty else { throw ThemeError.invalid(L("恢复记录损坏。")) }
             originals = backup; _ = stop()
         } catch { self.error = error.localizedDescription }
     }
@@ -438,7 +445,8 @@ final class CursorRuntime: ObservableObject {
             if machine.motion == .normal || machine.motion == .idle { machine.reset(now: now) }
             if selected == nil {
                 renderer.passThrough()
-                status = "自定义光标 · 等待已知状态后自动恢复"
+                statusKey = nil
+                status = L("自定义光标 · 等待已知状态后自动恢复")
             }
         }
         reconcileRelease(); render(); scheduleNext()
@@ -543,7 +551,7 @@ final class CursorRuntime: ObservableObject {
         // previous role. Our own submitted animation seeds are never matched.
         guard scenes.missionControl || currentSeed == lastSeed || renderer.owns(seed: currentSeed) else { return }
         if role.usesNative || normal[role.id] == nil {
-            renderer.passThrough(); updateStatus("\(role.name) · 系统原有光标"); return
+            renderer.passThrough(); updateStatus(role: role, motion: .normal, native: true); return
         }
         let interacting = [.press, .hold, .release].contains(machine.motion)
         if !interacting { dockGesture = false }
@@ -575,9 +583,18 @@ final class CursorRuntime: ObservableObject {
                 staticOnly: scenes.missionControl && !shellClick, synchronizeRegistration: magnification == 1 && abs(scale - (registeredScales[role.id] ?? -1)) < 0.005,
                 shell: shellClick)
         }
-        updateStatus(scenes.missionControl ? "调度中心 · \(shellClick ? motion.title : "主题静态光标")" : "\(role.name) · \(motion.title) · 系统光标通道")
+        updateStatus(role: role, motion: motion, native: false, shellClick: shellClick)
     }
-    private func updateStatus(_ text: String) { if status != text { status = text } }
+    private func updateStatus(role: CursorRole, motion: Motion, native: Bool, shellClick: Bool = false) {
+        let key = StatusKey(role: role.id, motion: motion, shell: scenes.missionControl, native: native, shellClick: shellClick)
+        guard statusKey != key else { return }
+        statusKey = key
+        let text: String
+        if native { text = L("\(role.localizedName) · 系统原有光标") }
+        else if scenes.missionControl { text = L("调度中心 · \(shellClick ? motion.title : L("主题静态光标"))") }
+        else { text = L("\(role.localizedName) · \(motion.title) · 系统光标通道") }
+        if status != text { status = text }
+    }
     private func synchronizeEditorCorner(at point: CGPoint) {
         guard roles["com.apple.cursor.35"] != nil, NSApp.isActive, let window = NSApp.windows.first(where: {
             $0.isVisible && $0.canBecomeMain && $0.styleMask.contains(.resizable) && $0.title == "Gallery"

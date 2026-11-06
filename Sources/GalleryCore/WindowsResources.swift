@@ -7,17 +7,17 @@ public struct WindowsResources {
     private let data: Data
     public let entries: [String: Range<Int>]
     public init(data: Data) throws {
-        guard data.count <= Self.maximumInstallerBytes else { throw ThemeError.invalid("安装包超过 2 GB。") }
+        guard data.count <= Self.maximumInstallerBytes else { throw ThemeError.invalid(L("安装包超过 2 GB。")) }
         let r = BinaryReader(data: data)
-        guard try r.u16(0) == 0x5a4d else { throw ThemeError.invalid("不是 Windows 安装器。") }
+        guard try r.u16(0) == 0x5a4d else { throw ThemeError.invalid(L("不是 Windows 安装器。")) }
         let pe = try r.u32(0x3c)
-        guard try r.u32(pe) == 0x4550 else { throw ThemeError.invalid("PE 签名无效。") }
+        guard try r.u32(pe) == 0x4550 else { throw ThemeError.invalid(L("PE 签名无效。")) }
         let sections = try r.u16(pe + 6), optSize = try r.u16(pe + 20), optional = pe + 24
-        guard sections > 0, sections <= 96 else { throw ThemeError.invalid("PE 节表无效。") }
+        guard sections > 0, sections <= 96 else { throw ThemeError.invalid(L("PE 节表无效。")) }
         let magic = try r.u16(optional)
-        guard magic == 0x10b || magic == 0x20b else { throw ThemeError.invalid("不支持此 PE 格式。") }
+        guard magic == 0x10b || magic == 0x20b else { throw ThemeError.invalid(L("不支持此 PE 格式。")) }
         let directory = optional + (magic == 0x10b ? 96 : 112)
-        guard optSize >= directory - optional + 15 * 8 else { throw ThemeError.invalid("缺少 CLI 目录。") }
+        guard optSize >= directory - optional + 15 * 8 else { throw ThemeError.invalid(L("缺少 CLI 目录。")) }
         func fileOffset(_ address: Int) throws -> Int {
             for i in 0..<sections {
                 let section = optional + optSize + i * 40
@@ -27,19 +27,19 @@ public struct WindowsResources {
                     try r.bounds(offset, 1); return offset
                 }
             }
-            throw ThemeError.invalid("CLI 地址不在有效节内。")
+            throw ThemeError.invalid(L("CLI 地址不在有效节内。"))
         }
         let cli = try fileOffset(r.u32(directory + 14 * 8))
         let metadata = try fileOffset(r.u32(cli + 8))
         let resources = try fileOffset(r.u32(cli + 24))
         let resourcesLength = try r.u32(cli + 28)
         try r.bounds(resources, resourcesLength)
-        guard try r.u32(metadata) == 0x424a5342 else { throw ThemeError.invalid("CLI 元数据签名无效。") }
+        guard try r.u32(metadata) == 0x424a5342 else { throw ThemeError.invalid(L("CLI 元数据签名无效。")) }
         let versionLength = try r.u32(metadata + 12)
         var p = metadata + 16 + versionLength
         p = (p + 3) & ~3
         let streams = try r.u16(p + 2); p += 4
-        guard streams <= 32 else { throw ThemeError.invalid("元数据流过多。") }
+        guard streams <= 32 else { throw ThemeError.invalid(L("元数据流过多。")) }
         var streamOffsets: [String: Int] = [:]
         for _ in 0..<streams {
             let offset = try r.u32(p), length = try r.u32(p + 4)
@@ -49,7 +49,7 @@ public struct WindowsResources {
             p = (p + 8 + consumed + 3) & ~3
         }
         guard let strings = streamOffsets["#Strings"], let tables = streamOffsets["#~"] ?? streamOffsets["#-"] else {
-            throw ThemeError.invalid("安装器缺少标准 CLI 元数据表。")
+            throw ThemeError.invalid(L("安装器缺少标准 CLI 元数据表。"))
         }
         let heapFlags = try r.byte(tables + 6)
         let stringIndex = heapFlags & 1 == 0 ? 2 : 4
@@ -78,11 +78,11 @@ public struct WindowsResources {
             12+b*2+s*2, 4+index(35), 12+index(35), 4+s+b, 8+s*2+implementation
         ]
         for table in 0..<40 {
-            guard counts[table] <= 5_000_000 else { throw ThemeError.invalid("元数据表过大。") }
+            guard counts[table] <= 5_000_000 else { throw ThemeError.invalid(L("元数据表过大。")) }
             let length = counts[table] * sizes[table]
             try r.bounds(p, length); p += length
         }
-        guard counts[40] > 0, counts[40] <= 10000 else { throw ThemeError.invalid("未找到嵌入素材。") }
+        guard counts[40] > 0, counts[40] <= 10000 else { throw ThemeError.invalid(L("未找到嵌入素材。")) }
         var found: [String: Range<Int>] = [:]
         for _ in 0..<counts[40] {
             let offset = try r.u32(p)
@@ -91,14 +91,14 @@ public struct WindowsResources {
             let (name, _) = try r.string(strings + nameOffset, maximum: 512)
             let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
             if external == 0, ["cur", "ani", "inf"].contains(ext) {
-                guard offset + 4 <= resourcesLength else { throw ThemeError.invalid("素材偏移越界。") }
+                guard offset + 4 <= resourcesLength else { throw ThemeError.invalid(L("素材偏移越界。")) }
                 let length = try r.u32(resources + offset)
-                guard length > 0, length <= 40_000_000, offset + 4 + length <= resourcesLength else { throw ThemeError.invalid("素材长度越界。") }
+                guard length > 0, length <= 40_000_000, offset + 4 + length <= resourcesLength else { throw ThemeError.invalid(L("素材长度越界。")) }
                 found[name] = resources + offset + 4..<resources + offset + 4 + length
             }
             p += 8 + s + implementation
         }
-        guard !found.isEmpty else { throw ThemeError.invalid("安装器没有内嵌可直接读取的 CUR、ANI 或 INF 资源。") }
+        guard !found.isEmpty else { throw ThemeError.invalid(L("安装器没有内嵌可直接读取的 CUR、ANI 或 INF 资源。")) }
         self.data = data; self.entries = found
     }
     public func resource(named name: String) -> Data? {
@@ -173,7 +173,7 @@ public struct WindowsResources {
 private struct BinaryReader {
     let data: Data
     func bounds(_ p: Int, _ length: Int) throws {
-        guard p >= 0, length >= 0, p <= data.count, length <= data.count - p else { throw ThemeError.invalid("安装器数据已截断或越界。") }
+        guard p >= 0, length >= 0, p <= data.count, length <= data.count - p else { throw ThemeError.invalid(L("安装器数据已截断或越界。")) }
     }
     func byte(_ p: Int) throws -> Int { try bounds(p, 1); return Int(data[p]) }
     func integer(_ p: Int, bytes: Int) throws -> Int {
@@ -185,7 +185,7 @@ private struct BinaryReader {
     func string(_ p: Int, maximum: Int) throws -> (String, Int) {
         try bounds(p, 1)
         let end = min(data.count, p + maximum)
-        guard let zero = data[p..<end].firstIndex(of: 0), let string = String(data: data[p..<zero], encoding: .utf8) else { throw ThemeError.invalid("元数据字符串无效。") }
+        guard let zero = data[p..<end].firstIndex(of: 0), let string = String(data: data[p..<zero], encoding: .utf8) else { throw ThemeError.invalid(L("元数据字符串无效。")) }
         return (string, zero - p + 1)
     }
 }

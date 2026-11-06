@@ -16,7 +16,7 @@ final class ThemeReadCache: @unchecked Sendable {
         guard let date = attributes[.modificationDate] as? Date,
               let bytes = attributes[.size] as? NSNumber,
               let inode = attributes[.systemFileNumber] as? NSNumber,
-              let device = attributes[.systemNumber] as? NSNumber else { throw ThemeError.invalid("无法读取主题文件信息。") }
+              let device = attributes[.systemNumber] as? NSNumber else { throw ThemeError.invalid(L("无法读取主题文件信息。")) }
         return Stamp(modified: date, bytes: bytes.intValue, inode: inode.uint64Value, device: device.uint64Value)
     }
     func canPrepare(_ url: URL) -> Bool { (try? stamp(url).bytes).map { $0 <= 20 * 1024 * 1024 } ?? false }

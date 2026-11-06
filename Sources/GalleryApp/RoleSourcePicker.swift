@@ -17,16 +17,16 @@ struct RoleSourcePicker: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("从其他主题选取光标").font(.title2.bold())
-            Text("只替换当前角色的素材，保留它的系统用途和独立大小。保存后无需保留来源主题文件。")
+            Text(L("从其他主题选取光标")).font(.title2.bold())
+            Text(L("只替换当前角色的素材，保留它的系统用途和独立大小。保存后无需保留来源主题文件。"))
                 .foregroundStyle(.secondary)
             if sources.isEmpty {
-                ContentUnavailableView("还没有其他主题", systemImage: "folder.badge.plus", description: Text("请先导入另一个主题，随后在这里选取它的角色。"))
+                ContentUnavailableView(L("还没有其他主题"), systemImage: "folder.badge.plus", description: Text(L("请先导入另一个主题，随后在这里选取它的角色。")))
             } else {
-                Picker("主题目录", selection: $themeID) { ForEach(sources) { Text($0.name).tag($0.id) } }
-                if loading { ProgressView("正在读取主题…") }
+                Picker(L("主题目录"), selection: $themeID) { ForEach(sources) { Text($0.localizedName).tag($0.id) } }
+                if loading { ProgressView(L("正在读取主题…")) }
                 if loaded != nil {
-                    Picker("光标角色", selection: $roleID) { ForEach(roles) { Text($0.name).tag($0.id) } }
+                    Picker(L("光标角色"), selection: $roleID) { ForEach(roles) { Text($0.localizedName).tag($0.id) } }
                     if let role = roles.first(where: { $0.id == roleID }), let frame = role.clip(.normal)?.frames.first,
                        let image = EditorImageCache.image(frame) {
                         Image(nsImage: image).resizable().scaledToFit().frame(height: 100).frame(maxWidth: .infinity)
@@ -36,9 +36,9 @@ struct RoleSourcePicker: View {
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
             Spacer(minLength: 0)
             HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("使用这个角色") {
+                Button(L("使用这个角色")) {
                     guard let loaded, let role = loaded.roles.first(where: { $0.id == roleID }) else { return }
                     store.useTemplate(role, sourceName: loaded.name); dismiss()
                 }.buttonStyle(.borderedProminent).disabled(loading || loaded == nil).keyboardShortcut(.defaultAction)

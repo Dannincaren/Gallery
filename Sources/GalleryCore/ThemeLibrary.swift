@@ -90,7 +90,7 @@ public enum ThemeLibrary {
     public static func loadIndex(at url: URL) throws -> [LibraryTheme] {
         let rows = try JSONDecoder().decode([LibraryTheme].self, from: Data(contentsOf: url))
         guard rows.count <= 200, Set(rows.map(\.id)).count == rows.count,
-              rows.allSatisfy({ UUID(uuidString: $0.id) != nil }) else { throw ThemeError.invalid("主题目录索引无效。") }
+              rows.allSatisfy({ UUID(uuidString: $0.id) != nil }) else { throw ThemeError.invalid(L("主题目录索引无效。")) }
         return rows
     }
     public static func saveIndex(_ rows: [LibraryTheme], at url: URL) throws {
@@ -98,7 +98,7 @@ public enum ThemeLibrary {
         try encoder.encode(rows).write(to: url, options: .atomic)
     }
     public static func applyTemplate(_ template: CursorRole, sourceName: String, to identifier: String, in theme: inout GalleryTheme) throws {
-        guard let target = theme.roles.first(where: { $0.id == identifier }) else { throw ThemeError.invalid("找不到目标光标。") }
+        guard let target = theme.roles.first(where: { $0.id == identifier }) else { throw ThemeError.invalid(L("找不到目标光标。")) }
         var updated = theme
         for index in updated.roles.indices where CursorCatalog.family(updated.roles[index].id) == CursorCatalog.family(target.id) {
             updated.roles[index].clips = template.clips

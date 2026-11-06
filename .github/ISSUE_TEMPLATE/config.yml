@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用说明 / User guide
+    url: https://github.com/Danningcarer/Gallery#quick-start
+    about: 安装、导入、权限、恢复与常见问题；可在顶部切换语言。 / Installation, imports, permissions, recovery and FAQ, with a language switch at the top.

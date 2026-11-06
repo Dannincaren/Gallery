@@ -1,3 +1,4 @@
+import GalleryCore
 import AppKit
 
 @MainActor
@@ -13,7 +14,7 @@ final class MouseObservation {
     private(set) var latestWindowID: CGWindowID = 0
     private(set) var deliveredEvents = 0
     private var displayHeight = 0.0
-    var description: String { tap != nil ? "会话鼠标监听" : (active ? "系统鼠标事件监听" : "鼠标计数回退") }
+    var description: String { tap != nil ? L("会话鼠标监听") : (active ? L("系统鼠标事件监听") : L("鼠标计数回退")) }
     func start() {
         stop(); displayHeight = CGDisplayBounds(CGMainDisplayID()).height
         if CGPreflightListenEventAccess() { startTap() }

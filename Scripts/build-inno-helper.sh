@@ -45,8 +45,10 @@ for gallery_arch in arm64 x86_64; do
             cxxflags="-arch $gallery_arch -mmacosx-version-min=14.0" linkflags="-arch $gallery_arch -mmacosx-version-min=14.0" \
             --stagedir="stage-$gallery_arch" stage)
     fi
+    # Static dependencies need no runtime search paths from the build machine.
     "$gallery_cmake" -S "$gallery_repo/Vendor/Innoextract" -B "$gallery_repo/.build/inno-$gallery_arch" \
         -DCMAKE_POLICY_DEFAULT_CMP0167=OLD -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_SKIP_RPATH=ON \
         -DCMAKE_OSX_ARCHITECTURES="$gallery_arch" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
         -DBoost_NO_BOOST_CMAKE=ON -DBOOST_ROOT="$gallery_deps/boost_1_85_0" \
         -DBOOST_LIBRARYDIR="$gallery_deps/boost_1_85_0/stage-$gallery_arch/lib" -DBoost_USE_STATIC_LIBS=ON \

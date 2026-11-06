@@ -66,11 +66,11 @@ struct ThemeArchive: Codable {
         images = pool
     }
     func theme() throws -> GalleryTheme {
-        guard formatVersion == 2, images.count <= 12000, roles.count <= 80 else { throw ThemeError.invalid("主题资源数量无效。") }
+        guard formatVersion == 2, images.count <= 12000, roles.count <= 80 else { throw ThemeError.invalid(L("主题资源数量无效。")) }
         func restore(_ clip: Clip) throws -> CursorClip {
-            guard clip.frames.count <= 240 else { throw ThemeError.invalid("动画帧过多。") }
+            guard clip.frames.count <= 240 else { throw ThemeError.invalid(L("动画帧过多。")) }
             let frames = try clip.frames.map { key -> Data in
-                guard let bytes = images[key] else { throw ThemeError.invalid("主题缺少帧图像。") }
+                guard let bytes = images[key] else { throw ThemeError.invalid(L("主题缺少帧图像。")) }
                 return bytes
             }
             return CursorClip(frames: frames, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
@@ -86,7 +86,7 @@ struct ThemeArchive: Codable {
         theme.pointerScale = pointerScale ?? 1
         theme.appearance = appearance ?? CursorAppearance()
         if let coverFrame {
-            guard let cover = images[coverFrame] else { throw ThemeError.invalid("主题缺少封面图像。") }
+            guard let cover = images[coverFrame] else { throw ThemeError.invalid(L("主题缺少封面图像。")) }
             theme.coverFrame = cover
         }
         theme.idleDelay = idleDelay; theme.idleEnabled = idleEnabled; theme.clickEnabled = clickEnabled

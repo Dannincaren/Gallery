@@ -1,19 +1,26 @@
 name: Build Gallery
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   macos:
     runs-on: macos-15
+    timeout-minutes: 35
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Check imports and interaction behavior
         run: bash Scripts/check.sh
+      - name: Check native English and Chinese localization
+        run: bash Scripts/localization-check.sh
       - name: Build Universal application
         env:
           GALLERY_UNIVERSAL: '1'

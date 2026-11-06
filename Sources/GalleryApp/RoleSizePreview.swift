@@ -23,7 +23,7 @@ struct RoleSizePreview: View {
                         .frame(width: display.width, height: display.height)
                 }
             }.frame(width: 136, height: 136)
-            if let display { Text("\(Int(display.width.rounded())) × \(Int(display.height.rounded())) 点").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+            if let display { Text(L("\(Int(display.width.rounded())) × \(Int(display.height.rounded())) 点")).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
         }
         .task(id: Input(clip: source, appearance: appearance)) {
             let source = source, appearance = appearance
@@ -36,6 +36,6 @@ struct RoleSizePreview: View {
             }.value
             if !Task.isCancelled { rendered = result }
         }
-        .accessibilityLabel("实际大小预览")
+        .accessibilityLabel(L("实际大小预览"))
     }
 }

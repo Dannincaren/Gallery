@@ -31,14 +31,14 @@ public struct CursorAppearanceRenderer {
             let width = Int((clip.width * scale).rounded()), height = Int((clip.height * scale).rounded())
             guard let context = CGContext(data: nil, width: width, height: height,
                 bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw ThemeError.invalid("无法创建光标阴影。") }
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw ThemeError.invalid(L("无法创建光标阴影。")) }
             context.interpolationQuality = appearance.smoothEdges ? .high : .none
             context.setShouldAntialias(appearance.smoothEdges)
             context.setShadow(offset: CGSize(width: 0, height: -scale), blur: 1.5 * scale,
                               color: CGColor(gray: 0, alpha: 0.32))
             context.draw(image, in: CGRect(x: padding * scale, y: padding * scale,
                 width: original.width * factor * scale, height: original.height * factor * scale))
-            guard let rendered = context.makeImage() else { throw ThemeError.invalid("无法创建光标阴影。") }
+            guard let rendered = context.makeImage() else { throw ThemeError.invalid(L("无法创建光标阴影。")) }
             let png = try CursorImages.png(rendered); frames[key] = png; return png
         }
         try clip.validate(); return clip

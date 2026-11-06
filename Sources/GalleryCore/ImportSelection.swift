@@ -15,7 +15,7 @@ public enum ImportSelection {
                 guard let kept = selections[key], let alternatives = result.roles[index].variants[raw] else { continue }
                 let variants = alternatives.filter { kept.contains($0.id) }
                 if variants.isEmpty {
-                    guard motion != .normal else { throw ThemeError.invalid("\(result.roles[index].name)的常态至少需要保留一套素材。") }
+                    guard motion != .normal else { throw ThemeError.invalid(L("\(result.roles[index].localizedName)的常态至少需要保留一套素材。")) }
                     result.roles[index].clips.removeValue(forKey: raw)
                     result.roles[index].variants.removeValue(forKey: raw)
                     result.roles[index].selectedVariants.removeValue(forKey: raw)

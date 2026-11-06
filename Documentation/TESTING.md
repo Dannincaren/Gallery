@@ -18,6 +18,14 @@ Optional integration tests use local files, never downloaded or uploaded by the 
 
 These tests expect the reference fixture structure; they are not generic validation commands for arbitrary artwork. Legacy environment variable aliases remain accepted. Fixtures are intentionally absent from the repository.
 
+## Native language checks
+
+```sh
+bash Scripts/localization-check.sh
+```
+
+A small application bundle loads the real English and Simplified Chinese tables. Checks cover language negotiation (including fallback), numeric/filename interpolation, document metadata, stored role-name stability and translation-table placeholder parity. No system cursors or normal user preferences are changed.
+
 ## Editor checks
 
 ```sh

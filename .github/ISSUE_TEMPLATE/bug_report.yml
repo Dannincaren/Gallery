@@ -1,0 +1,40 @@
+name: 问题反馈 / Bug report
+description: 光标、导入、编辑器或性能问题 / Cursor, import, editor, or performance problems
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: 请用中文或英文描述。不要上传私人信息或无权分发的主题安装包。 / English or Chinese is welcome. Omit private information and artwork you cannot redistribute.
+  - type: input
+    id: environment
+    attributes:
+      label: 版本与设备 / Versions and Mac
+      placeholder: Gallery 1.0.1 · macOS version · Apple Silicon / Intel
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 问题与预期 / Actual and expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 光标角色、前台应用和具体操作；导入问题请写文件格式、大小和错误文字。 / Include cursor role, foreground app and action, or import format, size and exact error.
+    validations:
+      required: true
+  - type: dropdown
+    id: monitoring
+    attributes:
+      label: 输入监控 / Input Monitoring
+      options:
+        - 已开启 / Enabled
+        - 未开启 / Disabled
+        - 不确定或不相关 / Unsure or not relevant
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息 / Additional context
+      description: 可附不含个人信息的截图，或自行绘制的最小素材示例。 / Optional non-private screenshots or a small original cursor example.
