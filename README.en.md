@@ -13,8 +13,6 @@
   <p><a href="https://github.com/Danningcarer/Gallery/releases/latest"><b>Download</b></a> · <a href="#quick-start">Quick start</a> · <a href="https://github.com/Danningcarer/Gallery/issues/new/choose">Report an issue</a></p>
 </div>
 
-![Gallery theme library](Documentation/Images/gallery-en.png)
-
 Gallery is a macOS cursor customization and editing app built on [Mousecape](https://github.com/alexzielenski/Mousecape). It brings normal and idle loops, press/hold/release animations, Windows cursor imports, and visual editing into one app. The interface supports **English and Simplified Chinese, following macOS language preferences automatically**, including the system's per-app language setting.
 
 <a id="quick-start"></a>

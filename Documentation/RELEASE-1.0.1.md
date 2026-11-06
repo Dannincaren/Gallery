@@ -6,7 +6,7 @@
 - 翻译菜单、角色名称、编辑器、设置、导入、多素材选择、提示与错误；英文使用标记改为普通字形的 IN USE。
 - 精简导入窗口。首次打开自动显示完整、可滚动的导入说明；以后点击标题旁的 ⓘ 查看。完整提示不再挤在小字中截断。
 - 减少重复的状态文字、调度数组和屏幕信息查询，保留现有动画时序、缓存、帧率与鼠标事件路径。
-- 仓库默认展示完整中文说明，可切换完整英文版；补充使用截图、常见问题、贡献和反馈模板。
+- 仓库默认展示完整中文说明，可切换完整英文版；补充常见问题、贡献和反馈模板。
 
 需要 macOS 14+，包含 Apple 芯片与 Intel。解压 `Gallery-macOS.zip` 后将应用放入「应用程序」，正常停用并退出旧版再替换。应用标识与主题格式保持兼容。
 
@@ -20,7 +20,7 @@
 - Localize menus, role labels, editor/settings, imports, material selection, messages and errors. The English active-theme label uses ordinary IN USE lettering.
 - Simplify the import panel. A complete, scrollable guide opens on first use and can be reopened with ⓘ beside the title; long hints are no longer truncated in the compact panel.
 - Reduce repeated status formatting, temporary scheduling arrays, and screen-information queries while retaining animation timing, cache limits, frame rate and mouse event delivery.
-- Make Chinese the default complete README with a complete English alternative, screenshots, FAQ, contribution guidance and issue templates.
+- Make Chinese the default complete README with a complete English alternative, FAQ, contribution guidance and issue templates.
 
 Requires macOS 14+. The package includes Apple Silicon and Intel. Unzip `Gallery-macOS.zip`, stop and quit the previous version, and replace Gallery.app in Applications. The bundle identifier and theme format remain compatible.
 

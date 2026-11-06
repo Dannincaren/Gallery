@@ -13,8 +13,6 @@
   <p><a href="https://github.com/Danningcarer/Gallery/releases/latest"><b>下载最新版</b></a> · <a href="#quick-start">快速开始</a> · <a href="https://github.com/Danningcarer/Gallery/issues/new/choose">反馈问题</a></p>
 </div>
 
-![Gallery 主题橱窗](Documentation/Images/gallery-zh.png)
-
 Gallery 是基于 [Mousecape](https://github.com/alexzielenski/Mousecape) 扩展的 macOS 鼠标指针美化与编辑工具。它把常态、待机和按下／按住／松手动画、Windows 素材导入以及可视化编辑放在同一个应用里。界面支持**简体中文和英文，自动跟随 macOS 的语言偏好**，也支持系统的按应用语言设置。
 
 <a id="quick-start"></a>
