@@ -1,40 +1,6 @@
 import SwiftUI
-import Combine
 import GalleryNative
 import GalleryCore
-
-@MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    var store: GalleryStore? { didSet { if let pendingURL { self.pendingURL = nil; store?.importURL(pendingURL) } } }
-    private var pendingURL: URL?
-    private var pendingTermination: AnyCancellable?
-    func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first else { return }
-        if let store { store.importURL(url) } else { pendingURL = url }
-    }
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if let store, store.importing {
-            pendingTermination = store.$importing.filter { !$0 }.first().receive(on: DispatchQueue.main).sink { [weak self, weak store] _ in
-                MainActor.assumeIsolated {
-                    store?.saveNow(wait: true)
-                    let restored = store?.runtime.stop() != false
-                    self?.pendingTermination = nil
-                    sender.reply(toApplicationShouldTerminate: restored)
-                }
-            }
-            return .terminateLater
-        }
-        store?.saveNow(wait: true)
-        guard store?.runtime.stop() != false else { return .terminateCancel }
-        return .terminateNow
-    }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil) }
-        store?.refreshDockVisibility()
-        return true
-    }
-}
 
 @main
 struct GalleryApp: App {
@@ -96,11 +62,13 @@ struct GalleryApp: App {
             }
             exit(1)
         }
-        _store = StateObject(wrappedValue: GalleryStore())
+        let store = GalleryStore()
+        _store = StateObject(wrappedValue: store)
+        delegate.store = store
     }
     var body: some Scene {
         Window("Gallery", id: "editor") {
-            GalleryEditor(store: store).onAppear { delegate.store = store; store.handleLaunch() }
+            GalleryEditor(store: store)
         }.defaultSize(width: 1120, height: 780)
             .commands {
                 CommandGroup(replacing: .newItem) {

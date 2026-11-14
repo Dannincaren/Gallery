@@ -8,6 +8,8 @@ bash Scripts/check.sh
 
 The default suite uses synthetic assets, requires no third-party downloads and does not change system cursors. It covers interaction timing, fast input edges, press/hold/release rules, role families, archive migration, independent theme/role sizes (25–300%), appearance and preview-cache invalidation, frame editing, CUR/ANI decoding, INF mapping, and bounded imports.
 
+Click-isolation checks cover all cursor-family pairs in split and unsplit modes: a new role cannot inherit press deadlines or mouse-up animations, while returning to the original role preserves its own timeline. They also cover unknown roles, pause/reset, independent release durations, held-button idle suppression and alias continuity. Inactive roles do not create timers.
+
 Import fixtures include PE32/PE32+ managed resources; uncompressed and compressed .NET single-file manifest versions 1/2/6; duplicate ReadyToRun assets; standalone CUR/ANI; folder/INF/ZIP equivalence; UTF-16 INF; Unicode and legacy Chinese ZIP names; ZIP64; streaming Deflate; ZIP self-extractors; CRC corruption; invalid paths, offsets and declared lengths. Inno grouping/filtering uses synthetic directories; the bundled helper is checked separately.
 
 Optional integration tests use local files, never downloaded or uploaded by the suite:
@@ -49,6 +51,14 @@ The material-preview harness uses generated checkerboard artwork. It verifies ne
 
 `bash Scripts/preferences-check.sh` additionally verifies language selection and relaunch behavior in a disposable preferences domain. It requires a desktop session and permission to write its own test preferences; the normal Gallery preferences are left unchanged.
 
+## Windowless startup checks
+
+```sh
+bash Scripts/startup-check.sh /tmp/gallery-startup-check
+```
+
+Requires a desktop session and permission to write a disposable preferences domain. A menu-bar-only SwiftUI app uses the production delegate and store with an isolated library and a cursor-runtime spy; it does not link the native cursor bridge. Checks cover restoring the last applied theme without an editor window, hiding only the test app's Dock icon, late store attachment, disabled preferences, missing-theme fallback, recovery protection, pending documents and repeated launch/reopen callbacks. The test does not register login items or restart macOS.
+
 ## System cursor checks
 
 Stop and quit any running cursor replacement first. These checks temporarily replace system resources and keep an independent recovery journal in the supplied directory. Run them sequentially, with a compatible `.gallery` fixture:
@@ -59,6 +69,9 @@ bash Scripts/settings-check.sh /tmp/gallery-settings-check /path/to/theme.galler
 ```
 
 The settings fixture must include the expected 32-point geometry, animated roles and an alternate static text variant. Checks cover visible frame progression, press/hold/release continuity, stale observation rejection, resizing, appearance, active-theme edit isolation and restoration. They do not move the pointer or post OS input events. A passing controlled check does not prove every foreground application behaves correctly.
+
+The runtime harness additionally uses synthetic arrow/text/link assets to verify role isolation through both observed mouse-up and physical-state reconciliation, before running the supplied theme's drag, animation and restoration checks.
+To run just those synthetic click-isolation checks, append `--role-clicks-only` to the runtime-check command. The theme argument remains positional but is not opened in this mode.
 
 ## Desktop review before release
 

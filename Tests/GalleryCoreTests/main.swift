@@ -21,7 +21,16 @@ func require<T>(_ value: T?) throws -> T {
 }
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
+let roleInteraction = RoleInteractionTests()
 var checks: [(String, () throws -> Void)] = [
+    ("unsplit press cannot trigger another role's release", roleInteraction.testUnsplitPressDoesNotReleaseAnotherRole),
+    ("mouse-up and release duration belong to the mouse-down role", roleInteraction.testMouseUpOnlyReleasesTheDownRole),
+    ("role round trips and aliases retain their own click epoch", roleInteraction.testRoleRoundTripAndAliasesKeepOwnEpoch),
+    ("independent clicks retain each role's press and release clocks", roleInteraction.testNewRoleClickDoesNotOverwritePreviousRole),
+    ("unknown roles never inherit another role's click", roleInteraction.testUnknownRoleDoesNotAdoptAnotherClick),
+    ("reset clears hidden click timelines and retains active role", roleInteraction.testResetClearsHiddenTimelinesAndAcceptsNextClick),
+    ("physical drag blocks idle in other roles", roleInteraction.testHeldButtonBlocksIdleAcrossRoleSwitches),
+    ("all cursor family pairs isolate split and unsplit clicks", roleInteraction.testEveryCursorFamilyKeepsClicksIndependent),
     ("pixel art overrides smoothing in cached previews, shadow, export and legacy archives", regression.testPixelArtOverridesSmoothingAcrossPreviewsAndExport),
     ("stable update metadata, trusted release URLs and local version ordering", ReleaseTests().testStableReleaseAndLocalVersionComparison),
     ("ZIP64, legacy Chinese names, streaming, CRC rejection and ZIP self-extractors", imports.testZIP64LegacyNamesStreamingCRCAndSelfExtractor),

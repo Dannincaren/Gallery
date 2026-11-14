@@ -41,7 +41,7 @@ final class GalleryStore: ObservableObject {
     private var pendingDockRefresh: DispatchWorkItem?
     private var indexURL: URL { root.appendingPathComponent("themes.json") }
     private func themeURL(_ id: String) -> URL { root.appendingPathComponent("Themes/" + id + ".gallery") }
-    init(preview: Bool = false, rootURL: URL? = nil, legacyPointerScale: Double? = nil, runtime: CursorRuntime? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
+    init(preview: Bool = false, rootURL: URL? = nil, legacyPointerScale: Double? = nil, runtime: CursorRuntime? = nil, manageApplicationLifecycle: Bool? = nil, trashThemeFile: ((URL) throws -> URL)? = nil) {
         self.runtime = runtime ?? CursorRuntime()
         let savedScale = legacyPointerScale ?? (rootURL == nil && !preview ? UserDefaults.standard.double(forKey: "pointerScale") : 1)
         let inheritedScale = savedScale.isFinite && (0.25...3).contains(savedScale) ? savedScale : 1
@@ -54,7 +54,9 @@ final class GalleryStore: ObservableObject {
             return result
         }
         self.preview = preview
-        selectionDefaults = rootURL == nil && !preview
+        // Custom libraries normally leave app preferences and Dock visibility
+        // alone; isolated startup checks can explicitly exercise that lifecycle.
+        selectionDefaults = !preview && (manageApplicationLifecycle ?? (rootURL == nil))
         root = rootURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Gallery")
         var loaded = Demo.makeTheme(), rows: [LibraryTheme] = [], selected = UUID().uuidString
         if !preview {

@@ -122,7 +122,7 @@ GALLERY_UNIVERSAL=1 bash Scripts/build.sh
 ./dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-欢迎用中文或英文[报告问题、提出建议](https://github.com/Dannincaren/Gallery/issues/new/choose)或提交改进。请提供应用和系统版本、复现步骤，避免上传私人资料或无权分发的素材。开发规范见[贡献说明](CONTRIBUTING.md)，检查入口见[测试说明](Documentation/TESTING.md)，本版变化见[1.0.2 发布说明](Documentation/RELEASE-1.0.2.md)。
+欢迎用中文或英文[报告问题、提出建议](https://github.com/Dannincaren/Gallery/issues/new/choose)或提交改进。请提供应用和系统版本、复现步骤，避免上传私人资料或无权分发的素材。开发规范见[贡献说明](CONTRIBUTING.md)，检查入口见[测试说明](Documentation/TESTING.md)，本版变化见[1.0.3 发布说明](Documentation/RELEASE-1.0.3.md)。
 
 ## 许可与致谢
 

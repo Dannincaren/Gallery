@@ -122,7 +122,7 @@ Convert a supported Windows cursor package without opening the editor:
 ./dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-[Report bugs or request features](https://github.com/Dannincaren/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.0.2 release notes](Documentation/RELEASE-1.0.2.md).
+[Report bugs or request features](https://github.com/Dannincaren/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.0.3 release notes](Documentation/RELEASE-1.0.3.md).
 
 ## License and credits
 

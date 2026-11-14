@@ -27,7 +27,7 @@ final class CursorRuntime: ObservableObject {
     private var roleID: String?
     private var roleRevision = 0
     private var roleAliases: [String] = []
-    private var machine = InteractionMachine(now: ProcessInfo.processInfo.systemUptime)
+    private var machine = RoleInteractionMachine(now: ProcessInfo.processInfo.systemUptime)
     private var normalClocks = RoleAnimationClocks()
     private var timer: Timer?
     private let observation = MouseObservation()
@@ -440,9 +440,7 @@ final class CursorRuntime: ObservableObject {
         if selected != roleID {
             roleRevision += 1
             roleID = selected
-            // Drag/drop and focus changes can change the cursor family in
-            // the middle of a click. Preserve that gesture's phase and epoch.
-            if machine.motion == .normal || machine.motion == .idle { machine.reset(now: now) }
+            machine.selectRole(selected, now: now)
             if selected == nil {
                 renderer.passThrough()
                 statusKey = nil
@@ -475,7 +473,7 @@ final class CursorRuntime: ObservableObject {
         if rawInputRecords.count > 300 { rawInputRecords.removeFirst() }
         #endif
         lastLeftUp = timestamp; lastLeftEdge = max(lastLeftEdge, timestamp)
-        machine.up(now: timestamp, releaseDuration: currentRole?.clip(.release)?.duration, enabled: theme?.clickEnabled ?? false)
+        machine.up(now: timestamp, enabled: theme?.clickEnabled ?? false)
         acknowledgeCounter(.up); counterGesture = false
     }
     private func acknowledgeCounter(_ edge: MouseEdge) {
@@ -653,7 +651,7 @@ final class CursorRuntime: ObservableObject {
                     split: currentRole?.splitClickAnimation ?? false, releaseDuration: currentRole?.clip(.release)?.duration)
             } else {
                 lastLeftUp = timestamp
-                machine.up(now: timestamp, releaseDuration: currentRole?.clip(.release)?.duration, enabled: theme.clickEnabled)
+                machine.up(now: timestamp, enabled: theme.clickEnabled)
             }
             if observed {
                 acknowledgeCounter(type == .leftMouseDown ? .down : .up); counterGesture = false

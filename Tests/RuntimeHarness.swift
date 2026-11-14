@@ -21,6 +21,52 @@ struct RuntimeHarness {
         var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
         return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
     }
+    static func checkRoleClicks(root: URL, images: [Data]) throws {
+        let engine = CursorRuntime(recoveryURL: root.appendingPathComponent("role-click-recovery.plist"))
+        defer { _ = engine.stop() }
+        let arrow = "com.apple.coregraphics.Arrow", text = "com.apple.coregraphics.IBeam", link = "com.apple.cursor.13"
+        for split in [false, true] {
+            let roles = [arrow, text, link].enumerated().map { index, id -> CursorRole in
+                var clips = ["normal": CursorClip(frames: [images[index]]),
+                    "press": CursorClip(frames: [images[0], images[2]], frameDuration: 0.12),
+                    "release": CursorClip(frames: [images[2], images[1]], frameDuration: 0.3 + Double(index) * 0.1)]
+                if split { clips["hold"] = CursorClip(frames: [images[0]]) }
+                return CursorRole(id: id, name: id, clips: clips)
+            }
+            var theme = GalleryTheme(name: "Role click isolation", roles: roles); theme.idleEnabled = false
+            engine.start(theme); try verify(engine.enabled, engine.error ?? "角色隔离检查启用失败")
+            engine.testRecognitionSuspended = true; engine.testPhysicalDown = true
+            engine.testIdentify([arrow]); engine.injectObserved(.leftMouseDown)
+            let pressedAt = engine.testMotionStartedAt
+            engine.testIdentify(["com.apple.cursor.0"])
+            try verify(engine.testMotion == .press && engine.testMotionStartedAt == pressedAt, "别名变化重播按下")
+            engine.testIdentify([text])
+            try verify(engine.testMotion == .normal, "新角色继承了上一角色的按下")
+            engine.testPhysicalDown = false; engine.injectObserved(.leftMouseUp)
+            try verify(engine.testMotion == .normal, "未按下的新角色播放了松手")
+            pump(0.27)
+            try verify(engine.testMotion == .normal, "旧角色的按下截止时间触发新角色松手")
+            engine.testIdentify([arrow])
+            try verify(engine.testMotion == .release, "原角色没有保留自己的松手过程")
+            let releaseAt = engine.testMotionStartedAt
+            if !split { try verify(abs(releaseAt - pressedAt - 0.24) < 0.00001, "原角色的自动松手时钟被重置") }
+            engine.testIdentify([link])
+            try verify(engine.testMotion == .normal, "第三个角色继承了松手")
+            engine.testIdentify([arrow])
+            try verify(engine.testMotionStartedAt == releaseAt, "返回原角色重播松手")
+            pump(0.65)
+            // The physical-state fallback must route mouse-up to the same
+            // owner as the observed event path, including while it is hidden.
+            engine.testPhysicalDown = true; engine.injectObserved(.leftMouseDown)
+            engine.testIdentify([text]); pump(0.012)
+            engine.testPhysicalDown = false; engine.testIdentify([text])
+            try verify(engine.testMotion == .normal, "物理松手补偿向新角色注入了松手")
+            engine.testIdentify([arrow])
+            try verify(engine.testMotion == (split ? .release : .press), "物理松手补偿丢失了原角色阶段")
+            try verify(engine.stop() && !engine.hasRecovery, "角色隔离检查未恢复系统光标")
+        }
+        print("PASS split/unsplit clicks, aliases and physical-up fallback keep independent role timelines")
+    }
     static func main() {
         setbuf(stdout, nil)
         _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited); NSApp.finishLaunching()
@@ -37,6 +83,10 @@ struct RuntimeHarness {
                 return try CursorImages.png(context.makeImage()!)
             }
             let clip = CursorClip(frames: data, frameDuration: 0.1, hotX: 3, hotY: 3)
+            if CommandLine.arguments.contains("--role-clicks-only") {
+                try checkRoleClicks(root: root, images: data)
+                return
+            }
             let prepared = try PreparedCursors(roles: [CursorRole(id: "test", name: "Test", clips: ["normal": clip])]).clip(role: "test", motion: .normal)!
             let start = ProcessInfo.processInfo.systemUptime
             var colorSeeds: [Int32] = []
@@ -106,6 +156,7 @@ struct RuntimeHarness {
             try verify(confirmed && renderer.owns(seed: GLCursorBridge.cursorSeed()), "实际图像确认后仍无法识别自己的提交")
             renderer.testDelayedSeed = false; renderer.stop(restoring: initial)
             print("PASS delayed seed never claims foreground; actual image acknowledges submission")
+            try checkRoleClicks(root: root, images: data)
             let originalArrowClip = try CursorImages.fromCape(GLCursorBridge.standardCursor("com.apple.coregraphics.Arrow")!)
             let originalArrow = NSCursor(image: NSImage(cgImage: try CursorImages.bitmap(originalArrowClip.frames[0]),
                 size: NSSize(width: originalArrowClip.width, height: originalArrowClip.height)),
