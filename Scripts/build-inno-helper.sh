@@ -17,9 +17,9 @@ fetch() {
     [[ "$actual" == "$expected" ]] || { echo "Dependency checksum failed: $target" >&2; exit 1; }
 }
 fetch boost_1_85_0.tar.bz2 https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.bz2 7009fe1faa1697476bdc7027703a2badb84e849b7b0baad5086b087b971f8617
-fetch xz-5.8.1.tar.xz https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.xz 0b54f79df85912504de0b14aec7971e3f964491af1812d83447005807513cd9e
+fetch xz-5.8.4.tar.xz https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.xz 4ce24038fd4221e0d13bc1a2de7a4db56e90b92b3bf75321f6c14be73f65de4b
 [[ -d "$gallery_deps/boost_1_85_0" ]] || tar -xjf "$gallery_deps/boost_1_85_0.tar.bz2" -C "$gallery_deps"
-[[ -d "$gallery_deps/xz-5.8.1" ]] || tar -xJf "$gallery_deps/xz-5.8.1.tar.xz" -C "$gallery_deps"
+[[ -d "$gallery_deps/xz-5.8.4" ]] || tar -xJf "$gallery_deps/xz-5.8.4.tar.xz" -C "$gallery_deps"
 gallery_cmake="${GALLERY_CMAKE:-}"
 if [[ -z "$gallery_cmake" ]]; then
     # Upstream innoextract still requires policies removed by CMake 4. Use
@@ -29,10 +29,10 @@ if [[ -z "$gallery_cmake" ]]; then
     fi
     gallery_cmake="$gallery_deps/buildtools/cmake/data/bin/cmake"
 fi
-"$gallery_cmake" -S "$gallery_deps/xz-5.8.1" -B "$gallery_deps/lzma-build" \
+"$gallery_cmake" -S "$gallery_deps/xz-5.8.4" -B "$gallery_deps/lzma-5.8.4-build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES='arm64;x86_64' -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DBUILD_SHARED_LIBS=OFF -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF -DXZ_TOOL_LZMAINFO=OFF -DBUILD_TESTING=OFF -DENABLE_NLS=OFF
-"$gallery_cmake" --build "$gallery_deps/lzma-build" -j "$gallery_jobs"
+"$gallery_cmake" --build "$gallery_deps/lzma-5.8.4-build" -j "$gallery_jobs"
 if [[ ! -x "$gallery_deps/boost_1_85_0/b2" ]]; then
     (cd "$gallery_deps/boost_1_85_0"; ./bootstrap.sh --with-libraries=filesystem,program_options,iostreams,date_time,system)
 fi
@@ -52,8 +52,8 @@ for gallery_arch in arm64 x86_64; do
         -DCMAKE_OSX_ARCHITECTURES="$gallery_arch" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
         -DBoost_NO_BOOST_CMAKE=ON -DBOOST_ROOT="$gallery_deps/boost_1_85_0" \
         -DBOOST_LIBRARYDIR="$gallery_deps/boost_1_85_0/stage-$gallery_arch/lib" -DBoost_USE_STATIC_LIBS=ON \
-        -DLZMA_USE_STATIC_LIBS=ON -DLZMA_INCLUDE_DIR="$gallery_deps/xz-5.8.1/src/liblzma/api" \
-        -DLZMA_LIBRARY="$gallery_deps/lzma-build/liblzma.a" -DBUILD_DECRYPTION=OFF
+        -DLZMA_USE_STATIC_LIBS=ON -DLZMA_INCLUDE_DIR="$gallery_deps/xz-5.8.4/src/liblzma/api" \
+        -DLZMA_LIBRARY="$gallery_deps/lzma-5.8.4-build/liblzma.a" -DBUILD_DECRYPTION=OFF
     "$gallery_cmake" --build "$gallery_repo/.build/inno-$gallery_arch" -j "$gallery_jobs"
 done
 lipo -create .build/inno-arm64/innoextract .build/inno-x86_64/innoextract -output .build/GalleryInno

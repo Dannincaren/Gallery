@@ -22,7 +22,7 @@ public enum InnoCursorImport {
         let process = Process(), pipe = Pipe()
         process.executableURL = helper
         process.arguments = ["--gallery-cursors", "--silent", "--extract", "--output-dir", root.path, url.path]
-        process.standardOutput = pipe; process.standardError = pipe
+        process.standardOutput = pipe; process.standardError = pipe; process.standardInput = FileHandle.nullDevice
         try process.run()
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 180, execute: timeout)
@@ -60,7 +60,7 @@ public enum InnoCursorImport {
             var files: [String: Data] = [:], total = 0
             let infs = configs.filter { $0.deletingLastPathComponent() == directory || $0.deletingLastPathComponent() == directory.deletingLastPathComponent() }
             for url in cursors + infs {
-                let data = try Data(contentsOf: url); total += data.count
+                let data = try BoundedFile.read(url, limit: min(40_000_000, 80_000_000 - total)); total += data.count
                 guard total <= 80_000_000 else { throw ThemeError.invalid(L("单套光标素材超过 80 MB。")) }
                 files[url.lastPathComponent] = data
             }

@@ -10,6 +10,29 @@ struct LocalizationHarness {
         func check(_ result: Bool, _ message: String) throws {
             if !result { throw ThemeError.invalid(message) }
         }
+        if CommandLine.arguments[1] == "--tables-only" {
+            let root = URL(fileURLWithPath: CommandLine.arguments[2])
+            func read(_ language: String) throws -> [String: String] {
+                let data = try Data(contentsOf: root.appendingPathComponent(language + ".lproj/Localizable.strings"))
+                return try PropertyListSerialization.propertyList(from: data, format: nil) as! [String: String]
+            }
+            let source = try read("zh-Hans"), target = try read("en")
+            try check(Set(source.keys) == Set(target.keys), "Language tables have different keys")
+            let pattern = try NSRegularExpression(pattern: #"%(?:\d+\$)?[-+0 #]*(?:\d+)?(?:\.\d+)?(?:ll|l|h)?[@dfius]"#)
+            func formats(_ value: String) -> [String] {
+                pattern.matches(in: value, range: NSRange(value.startIndex..., in: value)).map { String(value[Range($0.range, in: value)!]) }
+            }
+            for language in ["zh-Hans", "en"] {
+                let values = language == "en" ? target : source
+                let bundle = Bundle(path: root.appendingPathComponent(language + ".lproj").path)!
+                for (key, value) in values {
+                    try check(bundle.localizedString(forKey: key, value: nil, table: nil) == value, "Native table failed for " + key)
+                    try check(formats(source[key]!) == formats(target[key]!), "Placeholder mismatch for " + key)
+                }
+                print("PASS \(language): native resource lookup and placeholder parity for \(values.count) entries")
+            }
+            return
+        }
         try check(GalleryLocalization.isEnglish == english, "Incorrect language negotiation")
         try check(L("导入主题") == (english ? "Import Theme" : "导入主题"), "Missing static translation")
         try check(L("已选择 \(2) / \(3) 套") == (english ? "Selected 2 / 3 sets" : "已选择 2 / 3 套"), "Integer placeholders changed")

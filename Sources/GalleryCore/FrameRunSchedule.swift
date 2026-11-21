@@ -5,9 +5,15 @@ import Foundation
 public struct FrameRunSchedule {
     private var next: [Int?]
     private var loop: [Int?]
+    /// Visible changes in one complete cycle, including the wrap. A long
+    /// timeline can contain only a handful of distinct, held poses.
+    public let visibleChanges: Int
     public var isStatic: Bool { loop.first.flatMap { $0 } == nil }
     public init<T: Equatable>(_ frames: [T]) {
         let count = frames.count
+        visibleChanges = count > 1 ? frames.indices.reduce(0) {
+            $0 + (frames[$1] == frames[($1 + 1) % count] ? 0 : 1)
+        } : 0
         next = Array(repeating: nil, count: count)
         if count > 1 {
             for i in stride(from: count - 2, through: 0, by: -1) {

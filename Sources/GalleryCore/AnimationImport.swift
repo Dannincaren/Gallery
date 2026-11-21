@@ -60,15 +60,15 @@ public enum AnimationImport {
             for value in [length, 22] { ico.append(contentsOf: (0..<4).map { UInt8((value >> ($0 * 8)) & 255) }) }
             ico.append(payload); imageData = ico
         }
-        return CursorClip(frames: [try CursorImages.png(CursorImages.bitmap(imageData))],
+        let image = try CursorImages.bitmap(imageData)
+        guard image.width == width, image.height == height else { throw ThemeError.invalid(L("CUR 图像尺寸与目录不符。")) }
+        return CursorClip(frames: [try CursorImages.png(image)],
                           width: Double(min(width, 128)), height: Double(min(height, 128)),
                           hotX: Double(hotX) * Double(min(width, 128)) / Double(width),
                           hotY: Double(hotY) * Double(min(height, 128)) / Double(height))
     }
     public static func read(_ url: URL) throws -> CursorClip {
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size <= 40_000_000 else { throw ThemeError.invalid(L("动画文件为空或超过 40 MB。")) }
-        let data = try Data(contentsOf: url)
+        let data = try BoundedFile.read(url, limit: 40_000_000)
         let name = url.lastPathComponent.lowercased()
         return try read(data, extension: url.pathExtension, trimTerminalHold: name.contains("_press") || name.contains("_release") || name == "beam_click.ani")
     }
@@ -80,15 +80,20 @@ public enum AnimationImport {
         let count = CGImageSourceGetCount(source)
         guard (1...240).contains(count) else { throw ThemeError.invalid(L("动画需要 1–240 帧。")) }
         var frames: [Data] = [], durations: [Double] = []
+        var pixels = 0
         for i in 0..<count {
             guard let properties = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any],
                   let w = properties[kCGImagePropertyPixelWidth as String] as? Int,
                   let h = properties[kCGImagePropertyPixelHeight as String] as? Int,
-                  w > 0, h > 0, w <= 2048, h <= 2048,
-                  let image = CGImageSourceCreateImageAtIndex(source, i, nil) else { throw ThemeError.invalid(L("图像损坏或大于 2048 像素。")) }
-            frames.append(try CursorImages.png(image))
+                  w > 0, h > 0, w <= 2048, h <= 2048 else { throw ThemeError.invalid(L("图像损坏或大于 2048 像素。")) }
+            guard w * h <= 128_000_000 - pixels else { throw ThemeError.invalid(L("主题解码后的图像总量过大，请拆分主题。")) }
+            pixels += w * h
             let gif = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any]
             durations.append(max(1.0 / 60, (gif?[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime as String] as? Double) ?? 0.05))
+        }
+        for i in 0..<count {
+            guard let image = CGImageSourceCreateImageAtIndex(source, i, nil) else { throw ThemeError.invalid(L("图像损坏或大于 2048 像素。")) }
+            frames.append(try CursorImages.png(image))
         }
         return try uniform(frames: frames, durations: durations, template: CursorClip(frames: frames))
     }
@@ -102,7 +107,7 @@ public enum AnimationImport {
         guard declaredSize == data.count - 8 || declaredSize == data.count else {
             throw ThemeError.invalid(L("ANI 声明长度与实际文件不符，文件可能已截断。"))
         }
-        var frames: [CursorClip] = [], rates: [Int] = [], sequence: [Int] = []
+        var frames: [Data] = [], rates: [Int] = [], sequence: [Int] = []
         var defaultRate = 3, steps = 0
         var position = 12
         while position + 8 <= data.count {
@@ -121,7 +126,7 @@ public enum AnimationImport {
                     let n = try u32(data, p + 4)
                     guard p + 8 + n + n % 2 <= end, frames.count < 10000 else { throw ThemeError.invalid(L("ANI 帧越界。")) }
                     if String(data: data[p..<p + 4], encoding: .ascii) == "icon" {
-                        frames.append(try cursor(data.subdata(in: p + 8..<p + 8 + n)))
+                        frames.append(data.subdata(in: p + 8..<p + 8 + n))
                     }
                     p += 8 + n + n % 2
                 }
@@ -130,7 +135,8 @@ public enum AnimationImport {
             position = end + length % 2
         }
         guard position == data.count else { throw ThemeError.invalid(L("ANI 区块已截断。")) }
-        guard let template = frames.first else { throw ThemeError.invalid(L("ANI 缺少图像。")) }
+        guard let first = frames.first else { throw ThemeError.invalid(L("ANI 缺少图像。")) }
+        let template = try cursor(first)
         if steps == 0 { steps = frames.count }
         guard steps <= 10000 else { throw ThemeError.invalid(L("ANI 时序过长。")) }
         let indices = sequence.isEmpty ? (0..<steps).map { $0 % frames.count } : sequence
@@ -144,21 +150,34 @@ public enum AnimationImport {
             let typical = durations.dropLast().sorted()[max(0, (durations.count - 2) / 2)]
             if last > typical * 30 { durations[durations.count - 1] = max(1.0 / 60, typical) }
         }
-        return try uniform(frames: indices.map { frames[$0].frames[0] }, durations: durations, template: template)
+        return try uniform(frames: indices.map { frames[$0] }, durations: durations, template: template,
+            decode: { try cursor($0).frames[0] })
     }
-    private static func uniform(frames: [Data], durations: [Double], template: CursorClip) throws -> CursorClip {
+    private static func uniform(frames: [Data], durations: [Double], template: CursorClip,
+                                decode: ((Data) throws -> Data)? = nil) throws -> CursorClip {
+        guard !frames.isEmpty, frames.count == durations.count,
+              durations.allSatisfy({ $0.isFinite && $0 > 0 }) else { throw ThemeError.invalid(L("ANI 时序无效。")) }
+        var decoded: [Data: Data] = [:]
+        func image(_ data: Data) throws -> Data {
+            guard let decode else { return data }
+            if let known = decoded[data] { return known }
+            let result = try decode(data); decoded[data] = result; return result
+        }
         if frames.count == 1 {
-            var result = template; result.frames = frames; result.frameDuration = durations[0]
+            var result = template; result.frames = [try image(frames[0])]; result.frameDuration = durations[0]
             try result.validate(); return result
         }
         let total = durations.reduce(0, +)
-        let count = min(240, max(frames.count, Int(ceil(total * 30))))
+        guard total.isFinite else { throw ThemeError.invalid(L("ANI 时序无效。")) }
+        let count = min(240, max(frames.count, total >= 8 ? 240 : Int(ceil(total * 30))))
         var result = template
         var index = 0, accumulated = durations[0]
-        result.frames = (0..<count).map { n in
+        // Select the capped timeline before image decoding. Large ANI sources
+        // no longer decode thousands of discarded frames; repeats reuse PNGs.
+        result.frames = try (0..<count).map { n in
             let time = Double(n) * total / Double(count)
             while index + 1 < frames.count, time >= accumulated { index += 1; accumulated += durations[index] }
-            return frames[index]
+            return try image(frames[index])
         }
         result.frameDuration = total / Double(count)
         try result.validate()

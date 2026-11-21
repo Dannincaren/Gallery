@@ -43,7 +43,7 @@ struct ImportReviewSheet: View {
             }
             .disabled(!chosen.contains(index))
             Button { previewID = key } label: {
-                Label(L("预览"), systemImage: "eye")
+                Label(L("预览"), systemImage: "play.circle")
             }
             .buttonStyle(.bordered).controlSize(.small)
             .accessibilityLabel(L("预览 ") + role.localizedName + " · " + motion.title + " · " + variant.localizedName)

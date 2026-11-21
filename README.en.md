@@ -22,7 +22,7 @@ Gallery is a macOS cursor customization and editing app built on [Mousecape](htt
 2. **Import:** Click **＋** at the top right to choose a file or folder, or drop one into the window. The complete import guide opens the first time; reopen it with **ⓘ** beside the title. For packages containing multiple sets or variants, choose what to keep and preview materials on demand.
 3. **Apply:** Click a card to select it, then **▶** to start. Click the selected or active card again to edit it. Click **⏸** to stop and restore your cursors. Menu bar controls remain available after closing the window.
 
-For pixel themes, select **Pixel art** above Theme size in the theme editor to keep edges crisp. The choice is saved per theme and follows theme switching automatically. Covers and role thumbnails update when the change has been saved.
+Click the theme name at the top of the role sidebar for overall size, **Pixel art**, and custom mapping. Pixel art keeps edges crisp. The choice is saved per theme and follows theme switching automatically. Covers and role thumbnails update when the change has been saved.
 
 The built-in demo is drawn by this project and needs no external artwork. Only the active theme is locked for material editing; stop it to edit. Other themes remain editable.
 
@@ -32,7 +32,8 @@ The built-in demo is drawn by this project and needs no external artwork. Only t
 | --- | --- |
 | Animation | Normal and idle loops, press, hold, and release. Hold assets loop until mouse-up; each role can override its idle delay |
 | Visual editing | Pick or enter hotspots; adjust dimensions and frame timing; duplicate, replace, append, move, or delete the current frame; preview animations |
-| Size and appearance | Independent theme-wide and per-role size, each from 25% to 300%; optional antialiasing and soft shadows, with a per-theme pixel-art override for smoothing |
+| Custom mapping | Connect 46 detailed macOS destinations visually; edit independent copies when one source supplies several roles; undo and restore imported assignments |
+| Size and appearance | Independent theme-wide and per-role size, with 25%–300% controls additionally constrained by actual image-size bounds; optional antialiasing and soft shadows, with a per-theme pixel-art override for smoothing |
 | Theme gallery | Static covers, custom cover frames, search, drag reordering, rename, export, and move whole themes to Trash |
 | Role mixing | Use another theme's material for one role, keep a native cursor, or switch between several variants for the same role |
 | Everyday controls | Launch at login, apply on launch, hide the Dock icon while active, shake to enlarge, and pause interactions in selected apps; quit and check for updates from Settings |
@@ -58,7 +59,7 @@ Outer ZIP/EXE packages can be up to **2 GB**. Individual cursors are limited to 
 
 - **Input Monitoring** enables read-only mouse event listening. Gallery does not record keys, intercept clicks, or require Accessibility permission. Without it, fallback mouse events and counters are used; responsiveness can differ across apps.
 - **Themes stay on your Mac.** The app does not upload imported cursor assets or require an online theme service.
-- **Updates connect only on request.** Check public GitHub release information without sending theme assets or account credentials. Download and install new versions manually.
+- **Updates connect only on request.** Check public GitHub release information without sending theme assets or account credentials. Download packages directly in Settings with progress and cancellation. Open the verified package to replace the app.
 - **Back up before applying; restore when stopping.** Stop or quit normally to restore your previous cursors. After a crash or force quit, reopen Gallery and use recovery. Avoid running another automatic cursor-replacement app at the same time.
 - **Compatibility has limits:** Gallery uses private macOS cursor interfaces. Some application-drawn cursors and system security screens may remain native, and macOS updates can affect compatibility.
 
@@ -90,7 +91,7 @@ Changing pixel art, smoothing, or shadows regenerates affected covers and role t
 <details>
 <summary>How do I restore my original cursors?</summary>
 
-Choose Stop & Restore in the toolbar or menu bar, or quit normally. After a force quit, reopen the app and use recovery. Stop any other cursor-replacement software first. Signing out and back in resets session resources if normal recovery is unavailable.
+Choose Stop & Restore in the toolbar or menu bar, or quit normally. After a force quit, reopen the app and use recovery. Stop any other cursor-replacement software first. Signing out and back in resets session resources if normal recovery is unavailable. Native Wait animations exceeding the interface’s 24-frame limit restore through equal-cycle sampling, with the full original backed up separately; restoration is not frame-for-frame lossless. System files on disk remain unchanged.
 
 </details>
 
@@ -98,7 +99,7 @@ Choose Stop & Restore in the toolbar or menu bar, or quit normally. After a forc
 
 The priority is **click response → CPU/energy → size**. macOS owns cursor position and compositing. Short normal loops use native playback; other animations reuse bounded resource caches. Static gallery cards do not refresh continuously, and material previews run only on demand.
 
-Version 1.0.1 reduces repeated status formatting, temporary scheduling allocations, and screen-information queries. It does not increase polling, reduce frame rate, or replace the established playback/recovery path. See [performance notes](Documentation/PERFORMANCE-1.0.1.md) for measurements and their limits.
+Version 1.1.0 reuses prepared frames, prepares upcoming images in the background, and coalesces shake updates within a frame. Clicks and role changes still render immediately. One-shot strict animation deadlines improve scheduling under Game Mode; static and non-frame checks retain relaxed delivery. A completed Space switch counts as movement and restarts the idle delay; Mission Control keeps the normal pose while open. See [performance and energy notes](Documentation/ENERGY-OPTIMIZATION.md).
 
 ## Build and test
 
@@ -122,10 +123,10 @@ Convert a supported Windows cursor package without opening the editor:
 ./dist/Gallery.app/Contents/MacOS/Gallery --convert-windows /path/to/cursors.exe /path/to/theme.gallery
 ```
 
-[Report bugs or request features](https://github.com/Dannincaren/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.0.3 release notes](Documentation/RELEASE-1.0.3.md).
+[Report bugs or request features](https://github.com/Dannincaren/Gallery/issues/new/choose) in English or Chinese, or contribute a change. Include app/macOS versions and reproducible steps; omit private information and artwork you cannot redistribute. See [contributing](CONTRIBUTING.md), [testing](Documentation/TESTING.md), and the [1.1.0 release notes](Documentation/RELEASE-1.1.0.md). Use the [private reporting channel](SECURITY.md) for security issues; see the [security review](Documentation/SECURITY-1.1.0.md) for hardening scope.
 
 ## License and credits
 
 Gallery retains Mousecape's **noncommercial license**. Public source availability does not make this an unrestricted open-source project; Gallery is not MIT/OSI-licensed. Follow [LICENSE](LICENSE) when using or distributing it. Fonts, import components, and other dependencies retain their individual licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
-Third-party cursor artwork and Windows installers are not distributed with the project. Obtain material legally; importing it does not grant redistribution rights. Thanks to the authors of Mousecape and the included dependencies.
+User-imported cursor themes and Windows installers are not distributed with the project. Obtain material legally; importing it does not grant redistribution rights. Thanks to the authors of Mousecape and the included dependencies.

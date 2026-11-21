@@ -22,7 +22,10 @@ struct RoleSizePreview: View {
                     Image(nsImage: image).resizable().interpolation(appearance.effectiveSmoothEdges ? .high : .none)
                         .frame(width: display.width, height: display.height)
                 }
-            }.frame(width: 136, height: 136)
+            }.frame(width: min(256, max(136, (display?.width ?? 0) + 24)),
+                    height: min(256, max(136, (display?.height ?? 0) + 24)))
+                .clipped().animation(.easeInOut(duration: 0.2), value: display?.width)
+                .animation(.easeInOut(duration: 0.2), value: display?.height)
             if let display { Text(L("\(Int(display.width.rounded())) × \(Int(display.height.rounded())) 点")).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
         }
         .task(id: Input(clip: source, appearance: appearance)) {

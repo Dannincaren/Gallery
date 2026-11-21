@@ -1,5 +1,14 @@
+## Gallery adaptation
 
+Gallery bundles a cursor-only extraction helper, rather than the upstream CLI.
+The modified extraction path filters output and bounds expanded resources.
+Additional Gallery changes bound individual metadata strings to 16 MiB and their
+aggregate to 64 MiB per header stream, reject truncated strings before copying,
+cap wizard image counts and header tables, and limit raw LZMA decoder memory to
+256 MiB. The pinned liblzma dependency is XZ Utils 5.8.4. Modified code is marked
+in place; the original zlib license and attribution remain unchanged.
 
+The following is the upstream documentation.
 
 [Inno Setup](https://jrsoftware.org/isinfo.php) is a tool to create installers for Microsoft Windows applications. innoextract allows to extract such installers under non-Windows systems without running the actual installer using wine. innoextract currently supports installers created by Inno Setup 1.2.10 to 7.0.2.
 

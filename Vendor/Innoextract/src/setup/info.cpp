@@ -83,6 +83,8 @@ void load_wizard_images(std::istream & is, const setup::version & version,
 	if(version >= INNO_VERSION(5, 6, 0)) {
 		count = util::load<boost::uint32_t>(is);
 	}
+	// Gallery adaptation: check before vector allocation or skipping.
+	if(count > 256) { throw std::runtime_error("Too many wizard images"); }
 	
 	if(entries & (info::WizardImages | info::NoSkip)) {
 		images.resize(count);
@@ -193,6 +195,18 @@ void info::try_load(std::istream & is, entry_types entries, util::codepage_id fo
 	
 	debug("loading main header");
 	header.load(*reader, version);
+	// Gallery adaptation: cap all metadata vectors before entry allocation.
+	const size_t counts[] = { header.language_count, header.message_count,
+		header.permission_count, header.type_count, header.component_count, header.task_count,
+		header.directory_count, header.issig_key_count, header.file_count, header.icon_count,
+		header.ini_entry_count, header.registry_entry_count, header.delete_entry_count,
+		header.uninstall_delete_entry_count, header.run_entry_count,
+		header.uninstall_run_entry_count, header.data_entry_count };
+	boost::uint64_t total_entries = 0;
+	for(size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); ++i) {
+		if(counts[i] > 100000 - total_entries) { throw std::runtime_error("Installer metadata has too many entries"); }
+		total_entries += counts[i];
+	}
 	
 	debug("loading languages");
 	load_entries(*reader, entries, header.language_count, languages, Languages);

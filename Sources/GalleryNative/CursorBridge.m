@@ -26,6 +26,7 @@ typedef CGError (*NewConnectionFn)(int, GLConnection *);
 typedef CGError (*ClearCoreFn)(GLConnection);
 typedef int32_t (*VisibilityFn)(void);
 typedef void (*DockOverrideFn)(GLConnection, bool);
+typedef CGError (*MoveWindowFn)(GLConnection, CGWindowID, const CGPoint *);
 static ConnectionFn connectionFn;
 static RegisterFn registerFn;
 static CopyFn copyFn;
@@ -43,6 +44,7 @@ static GLConnection probeConnection;
 static ClearCoreFn clearCoreFn;
 static VisibilityFn visibilityFn;
 static DockOverrideFn dockOverrideFn;
+static MoveWindowFn moveWindowFn;
 
 static void loadSymbols(void) {
     static dispatch_once_t once;
@@ -65,6 +67,7 @@ static void loadSymbols(void) {
         clearCoreFn = (ClearCoreFn)dlsym(RTLD_DEFAULT, "CoreCursorUnregisterAll");
         visibilityFn = (VisibilityFn)dlsym(RTLD_DEFAULT, "SLCursorIsVisible");
         dockOverrideFn = (DockOverrideFn)dlsym(RTLD_DEFAULT, "CGSSetDockCursorOverride");
+        moveWindowFn = (MoveWindowFn)dlsym(RTLD_DEFAULT, "CGSMoveWindow");
     });
 }
 
@@ -101,6 +104,13 @@ static void loadSymbols(void) {
 }
 + (int32_t)cursorSeed { loadSymbols(); return seedFn ? seedFn() : -1; }
 + (int32_t)cursorVisibility { loadSymbols(); return visibilityFn ? (visibilityFn() != 0) : -1; }
++ (int32_t)moveOverlayWindow:(int32_t)window origin:(CGPoint)origin {
+    loadSymbols();
+    if (!connectionFn || !moveWindowFn || window <= 0 || !isfinite(origin.x) || !isfinite(origin.y)) return -10001;
+    // WindowServer enforces ownership: this connection can move only Gallery's
+    // own nonactivating overlay, never another application's window.
+    return moveWindowFn(connectionFn(), (CGWindowID)window, &origin);
+}
 + (int32_t)presentCursor:(NSCursor *)cursor {
     // Force a cached image to be submitted even when another process changed
     // the global cursor but AppKit still regards this object as current.
@@ -212,8 +222,10 @@ static void loadSymbols(void) {
     CGRect rect = CGRectZero; CGPoint hot = CGPointZero;
     int row = 0, depth = 0, components = 0, bits = 0;
     int error = globalDataFn(observer, bytes.mutableBytes, &length, &row, &rect, &hot, &depth, &components, &bits);
-    if (error || rect.size.width <= 0 || rect.size.width > 2048 || rect.size.height <= 0 || rect.size.height > 49152 ||
-        bits != 8 || components != 4 || row < rect.size.width * 4 || row * rect.size.height > bytes.length) return nil;
+    if (error || !isfinite(rect.size.width) || !isfinite(rect.size.height) || !isfinite(hot.x) || !isfinite(hot.y) ||
+        rect.size.width <= 0 || rect.size.width > 2048 || rect.size.height <= 0 || rect.size.height > 49152 ||
+        length <= 0 || length > bytes.length || bits != 8 || components != 4 ||
+        row < rect.size.width * 4 || row * rect.size.height > length) return nil;
     int32_t after = seedFn ? seedFn() : -1;
     if (before != after) return nil;
     CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)bytes);

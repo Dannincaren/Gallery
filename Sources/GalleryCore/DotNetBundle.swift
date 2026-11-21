@@ -65,14 +65,17 @@ enum DotNetBundle {
         // Application assemblies precede platform libraries; only examine the
         // latter if no application assembly contains cursor material.
         entries.sort { ($0.framework ? 1 : 0) < ($1.framework ? 1 : 0) }
-        var total = 0, result: [WindowsResources] = [], identities: [[String: Data]] = []
+        var total = 0, storedTotal = 0, result: [WindowsResources] = [], identities: [[String: Data]] = []
         for entry in entries {
             if entry.framework && !result.isEmpty { continue }
-            guard entry.size > 0, entry.size <= 80_000_000, total <= 160_000_000 - entry.size else {
+            let stored = entry.compressed > 0 ? entry.compressed : entry.size
+            guard entry.size > 0, entry.size <= 80_000_000, total <= 160_000_000 - entry.size,
+                  stored <= 80_000_000, storedTotal <= 160_000_000 - stored else {
                 throw ThemeError.invalid(L("内嵌程序集超过导入大小上限，请导入解压后的光标素材。"))
             }
             total += entry.size
-            let payload = data.subdata(in: entry.offset..<entry.offset + (entry.compressed > 0 ? entry.compressed : entry.size))
+            storedTotal += stored
+            let payload = data.subdata(in: entry.offset..<entry.offset + stored)
             let assembly = entry.compressed > 0 ? try inflate(payload, size: entry.size) : payload
             guard let resources = try? WindowsResources(data: assembly),
                   resources.entries.keys.contains(where: { ["cur", "ani"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }) else { continue }

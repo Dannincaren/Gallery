@@ -160,7 +160,7 @@ public struct WindowsResources {
             roles.append(CursorRole(id: descriptor.id, name: descriptor.title, clips: clips, variants: variants, selectedVariants: selected))
         }
         let theme = GalleryTheme(name: "Windows 光标主题", author: "本地导入", roles: roles)
-        try theme.validate(); return theme
+        try theme.validate(); try CursorImages.validateResources(theme); return theme
     }
     private func resized(_ clip: CursorClip) -> CursorClip {
         var c = clip

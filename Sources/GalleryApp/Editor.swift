@@ -37,9 +37,12 @@ struct GalleryEditor: View {
     @State private var themeToRename: LibraryTheme?
     @State private var editorActive = NSApp.isActive
     @State private var editorVisible = true
-    init(store: GalleryStore, startInTheme: Bool = false) {
+    @State private var showingThemeControls = true
+    @State private var mappingWindow = ThemeMappingWindowPresenter()
+    init(store: GalleryStore, startInTheme: Bool = false, mappingWindow: ThemeMappingWindowPresenter? = nil) {
         self.store = store; self.runtime = store.runtime; self.preferences = store.preferences
         _showingTheme = State(initialValue: startInTheme)
+        _mappingWindow = State(initialValue: mappingWindow ?? ThemeMappingWindowPresenter())
     }
     var body: some View {
         Group {
@@ -123,57 +126,48 @@ struct GalleryEditor: View {
             statusBar
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(store.roleIndex.map { store.theme.roles[$0].localizedName } ?? L("光标")).font(.largeTitle.bold())
-                            Text(L("直接调整热点与动画，自动保存到当前主题。")).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if store.editingActiveTheme { Button(L("暂停并编辑")) { runtime.stop() } }
-
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle(L("像素风格"), isOn: Binding(get: { store.theme.appearance.pixelArt }, set: {
-                            var appearance = store.theme.appearance; appearance.pixelArt = $0; store.setAppearance(appearance)
-                        }))
-                            .toggleStyle(.checkbox).fixedSize()
-                            .disabled(store.editingActiveTheme).accessibilityIdentifier("theme-pixel-art")
-                        Text(L("保留清晰的像素边缘，忽略本主题的抗锯齿设置；橱窗、预览与实际光标使用相同规则。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 12) {
-                        NumericSlider(title: L("主题整体大小"), value: Binding(get: { store.theme.pointerScale }, set: {
-                            store.setThemeScale($0)
-                        }), range: 25...300, unit: "%", multiplier: 100, onTrackingChanged: { adjustingSize = $0 })
-                        Button(L("还原")) { store.setThemeScale(1) }
-                        Text(L("仅影响当前主题")).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if store.importing {
-                        HStack { ProgressView().controlSize(.small); Text(L("正在转换和整理动画，请稍候…")) }
-                    }
-                    if let index = store.roleIndex {
-                        roleControls(store.theme.roles[index])
-                        Text(store.theme.roles[index].splitClickAnimation
-                             ? L("已添加按住动画：按住时持续播放，松开时播放松手动画。")
-                             : L("未添加按住动画：点击后自动连播按下与松手动画。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Picker(L("动画状态"), selection: $store.selectedMotion) {
-                        ForEach(Motion.allCases) { Text($0.title).tag($0) }
-                    }.pickerStyle(.segmented)
-                    if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
-                    if let index = store.roleIndex { variantControls(store.theme.roles[index]) }
-                    if let clip = store.clip {
-                        clipEditor(clip)
+                    if showingThemeControls {
+                        ThemeOverview(store: store, runtime: runtime, rename: {
+                            themeToRename = store.library.first { $0.id == store.selectedThemeID }
+                        }, delete: {
+                            themeToDelete = store.library.first { $0.id == store.selectedThemeID }
+                        }, mapping: { mappingWindow.show(for: store) })
                     } else {
-                        ContentUnavailableView {
-                            Label(L("尚未设置\(store.selectedMotion.title)动画"), systemImage: "film.stack")
-                        } description: {
-                            Text(L("可以复制常态开始编辑，或直接导入动画文件。未设置时使用常态光标。"))
-                        } actions: {
-                            Button(L("从常态复制")) { store.createClip() }
-                            Button(L("导入动画")) { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
-                        }.frame(minHeight: 360).disabled(store.editingActiveTheme)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(selectedThemeRoleGroup?.source.localizedName ?? L("光标")).font(.largeTitle.bold())
+                            }
+                            Spacer()
+                            if store.editingActiveTheme { Button(L("暂停并编辑")) { store.stopTheme() }.disabled(!store.canSwitchTheme) }
+
+                        }
+                        if store.importing {
+                            HStack { ProgressView().controlSize(.small); Text(L("正在转换和整理动画，请稍候…")) }
+                        }
+                        if let index = store.roleIndex {
+                            roleControls(store.theme.roles[index])
+                            Text(store.theme.roles[index].splitClickAnimation
+                                 ? L("已添加按住动画：按住时持续播放，松开时播放松手动画。")
+                                 : L("未添加按住动画：点击后自动连播按下与松手动画。"))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Picker(L("动画状态"), selection: $store.selectedMotion) {
+                            ForEach(Motion.allCases) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented)
+                        if store.selectedMotion == .idle, let index = store.roleIndex { idleTiming(store.theme.roles[index]) }
+                        if let index = store.roleIndex { variantControls(store.theme.roles[index]) }
+                        if let clip = store.clip {
+                            clipEditor(clip)
+                        } else {
+                            ContentUnavailableView {
+                                Label(L("尚未设置\(store.selectedMotion.title)动画"), systemImage: "film.stack")
+                            } description: {
+                                Text(L("可以复制常态开始编辑，或直接导入动画文件。未设置时使用常态光标。"))
+                            } actions: {
+                                Button(L("从常态复制")) { store.createClip() }
+                                Button(L("导入动画")) { store.importFrames(append: false) }.buttonStyle(.borderedProminent)
+                            }.frame(minHeight: 360).disabled(store.editingActiveTheme)
+                        }
                     }
                 }.padding(28)
             }
@@ -212,7 +206,7 @@ struct GalleryEditor: View {
             // title-bar capsule or shifts its right-hand controls.
             ToolbarIconButton(title: L("使用选中主题"), symbol: "play.circle",
                 tooltip: showsAdditionalStartControl && extraStartIconVisible ? L("开始使用选中的主题") : nil,
-                identifier: "start-selected-theme", enabled: !store.importing && themeControlID != nil && showsAdditionalStartControl,
+                identifier: "start-selected-theme", enabled: store.canSwitchTheme && themeControlID != nil && showsAdditionalStartControl,
                 action: startSelectedTheme)
                 .frame(width: 34, height: 30)
                 .frame(width: extraStartSlotExpanded ? 34 : 0, alignment: .trailing)
@@ -223,10 +217,10 @@ struct GalleryEditor: View {
                 symbol: runtime.enabled ? "pause.circle" : "play.circle",
                 tooltip: runtime.enabled ? L("停用并恢复光标") : (themeControlID == nil ? L("先选择一张主题卡片") : L("开始使用选中的主题")),
                 identifier: runtime.enabled ? "stop-gallery-theme" : "start-selected-theme",
-                enabled: !store.importing && (runtime.enabled || themeControlID != nil)) {
+                enabled: store.canSwitchTheme && (runtime.enabled || themeControlID != nil)) {
                 if runtime.enabled {
                     if !showingTheme && selectedGalleryThemeID == nil { selectedGalleryThemeID = store.activeThemeID }
-                    runtime.stop()
+                    store.stopTheme()
                 } else { startSelectedTheme() }
             }
                 .frame(width: 34, height: 30)
@@ -273,6 +267,7 @@ struct GalleryEditor: View {
     private func openTheme(_ id: String) {
         guard !store.importing else { return }
         selectedGalleryThemeID = id
+        showingThemeControls = true
         playing = true; previewStart = Date(); openingThemeID = id
         store.selectTheme(id)
         if store.selectedThemeID == id { showingTheme = true; openingThemeID = nil }
@@ -285,9 +280,9 @@ struct GalleryEditor: View {
     @ViewBuilder private func themeActions(_ folder: LibraryTheme) -> some View {
         Button(L("打开主题")) { openTheme(folder.id) }.disabled(store.importing)
         if store.isActiveTheme(folder.id) {
-            Button(L("停用并恢复光标")) { runtime.stop() }.disabled(store.importing)
+            Button(L("停用并恢复光标")) { store.stopTheme() }.disabled(!store.canSwitchTheme)
         } else {
-            Button(L("使用此主题")) { store.selectTheme(folder.id, activate: true) }.disabled(store.importing)
+            Button(L("使用此主题")) { store.selectTheme(folder.id, activate: true) }.disabled(!store.canSwitchTheme)
         }
         Divider()
         Button(L("重命名…")) { themeToRename = folder }.disabled(store.importing)
@@ -303,49 +298,57 @@ struct GalleryEditor: View {
         if store.library.count == 1 { text += L("删除后回到内置主题。") }
         return text
     }
+    private var selectedThemeRoleGroup: ThemeRoleGroup? {
+        store.theme.editorRoleGroups.first { group in group.destinations.contains { store.theme.roleFamily($0.id) == store.theme.roleFamily(store.selectedRole) } }
+    }
     private var sidebarText: Color { colorScheme == .dark ? .white : .black }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 20) {
             SidebarGalleryWordmark().padding(.top, 16).padding(.horizontal, 18)
-            HStack(alignment: .top, spacing: 12) {
+            Button { showingThemeControls = true } label: {
+            HStack(alignment: .center, spacing: 12) {
                 if let data = store.library.first(where: { $0.id == store.selectedThemeID })?.cover, let image = EditorImageCache.image(data) {
                     Image(nsImage: image).resizable().interpolation(.none).scaledToFit().frame(width: 36, height: 36)
                 }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(store.theme.localizedName).font(.headline).lineLimit(3).foregroundStyle(sidebarText)
-                    Text(store.isActiveTheme(store.selectedThemeID) ? L("正在使用") : L("正在浏览"))
-                        .font(.caption).foregroundStyle(store.isActiveTheme(store.selectedThemeID) ? .green : .secondary)
+                    Text(L("主题总调节")).font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                if let folder = store.library.first(where: { $0.id == store.selectedThemeID }) {
-                    Menu { themeActions(folder) } label: { Image(systemName: "ellipsis.circle").font(.title3) }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(L("主题操作"))
-                }
-            }.padding(14).background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 12)
+            }.padding(14).contentShape(RoundedRectangle(cornerRadius: 12))
+                .background(showingThemeControls ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+            }.buttonStyle(.plain).padding(.horizontal, 12).help(L("主题总调节")).accessibilityIdentifier("show-theme-overview")
             List {
                 Section {
-                    ForEach(store.visibleRoles) { role in roleRow(role) }
+                    ForEach(store.theme.editorRoleGroups) { group in roleRow(group) }
                 } header: { Text(L("光标角色")).foregroundStyle(sidebarText.opacity(0.65)) }
             }.listStyle(.sidebar)
         }.navigationSplitViewColumnWidth(min: 220, ideal: 246, max: 300)
     }
-    private func roleRow(_ role: CursorRole) -> some View {
+    private func roleRow(_ group: ThemeRoleGroup) -> some View {
+        let role = group.destinations.first ?? group.source
         let summary = store.library.first(where: { $0.id == store.selectedThemeID })?.roles.first(where: { $0.id == role.id })
-        let selected = CursorCatalog.family(store.selectedRole) == CursorCatalog.family(role.id)
-        return Button { store.selectedRole = role.id } label: {
+        let thumbnail = group.destinations.isEmpty ? group.source.clip(.normal)?.frames.first : summary?.thumbnail
+        let selected = !showingThemeControls && group.destinations.contains { store.theme.roleFamily($0.id) == store.theme.roleFamily(store.selectedRole) }
+        return Button {
+            if group.destinations.isEmpty { mappingWindow.show(for: store, sourceID: group.id) }
+            else { showingThemeControls = false; if !selected { store.selectedRole = role.id } }
+        } label: {
             HStack(spacing: 11) {
                 Group {
-                    if let data = summary?.thumbnail, let image = EditorImageCache.image(data) {
+                    if let data = thumbnail, let image = EditorImageCache.image(data) {
                         Image(nsImage: image).resizable().interpolation(.none).scaledToFit()
                     } else { Image(systemName: "cursorarrow").foregroundStyle(sidebarText.opacity(0.6)) }
                 }.frame(width: 28, height: 28).padding(5).background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 7))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(role.localizedName).font(.callout.weight(selected ? .semibold : .regular)).foregroundStyle(sidebarText)
-                    Text(roleSubtitle(LibraryRole(role))).font(.caption2).foregroundStyle(sidebarText.opacity(0.6))
+                    Text(group.source.localizedName).font(.callout.weight(selected ? .semibold : .regular)).foregroundStyle(sidebarText)
+                    Text(group.destinations.isEmpty ? (store.canEditMapping ? L("尚未映射 · 点击分配") : L("尚未映射 · 停用后分配")) : roleSubtitle(LibraryRole(role))).font(.caption2).foregroundStyle(sidebarText.opacity(0.6))
                 }
                 Spacer(minLength: 0)
             }.padding(.vertical, 5).padding(.horizontal, 6).contentShape(RoundedRectangle(cornerRadius: 8))
                 .background(selected ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)
+            .disabled(group.destinations.isEmpty && !store.canEditMapping)
+            .help(group.destinations.isEmpty && !store.canEditMapping ? L("请先停用主题，再编辑映射。") : group.source.localizedName)
     }
     private func roleSubtitle(_ role: LibraryRole) -> String {
         if role.usesNative { return L("系统原有") }
@@ -398,7 +401,7 @@ struct GalleryEditor: View {
             ThemeStatusSummary(
                 active: store.activeThemeName.map { L("正在使用：") + $0 } ?? (runtime.enabled ? L("自定义光标已启用") : L("自定义光标已停用")),
                 browsing: runtime.enabled && !store.isActiveTheme(store.selectedThemeID) ? L("浏览：\(store.theme.localizedName)") : nil,
-                detail: runtime.status)
+                detail: runtime.statusDisplay)
             Spacer()
             if runtime.hasRecovery && !runtime.enabled { Button(L("恢复上次光标")) { runtime.recover() } }
         }.padding(.horizontal, 24).padding(.vertical, 13).background(.quaternary.opacity(0.35))
@@ -504,10 +507,14 @@ struct GalleryEditor: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
                         NumericSlider(title: L("此角色大小"), value: Binding(get: { store.theme.roles.first { $0.id == role.id }?.scale ?? role.scale }, set: { store.setRoleScale($0, for: role.id) }),
-                                      range: 25...300, unit: "%", multiplier: 100, onTrackingChanged: { adjustingSize = $0 }).disabled(role.usesNative).id(store.selectedThemeID + role.id + ":size")
+                                      range: store.roleScaleLimits(role.id).percentages, unit: "%", multiplier: 100, showsLimits: true, onTrackingChanged: { adjustingSize = $0 }).disabled(role.usesNative).id(store.selectedThemeID + role.id + ":size")
                         Button(L("还原")) { store.setRoleScale(1, for: role.id) }.disabled(role.usesNative)
                     }
                     Text(L("叠加主题整体大小；右侧按实际大小静态预览。")).font(.caption).foregroundStyle(.secondary)
+                    if store.roleScaleLimits(role.id).conflicting {
+                        Text(L("部分素材的尺寸范围不兼容，请先单独调整角色或素材尺寸。"))
+                            .font(.caption).foregroundStyle(.red)
+                    }
                 }
                 RoleSizePreview(clip: role.clip(.normal), scale: store.theme.pointerScale * role.scale, appearance: store.theme.appearance)
             }
@@ -703,16 +710,6 @@ struct InteractionSettings: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
             Text(L("交互与应用")).font(.title2.bold())
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L("界面语言"))
-                    Text(L("重新打开 Gallery 后生效。")).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Picker(L("界面语言"), selection: Binding(get: { preferences.interfaceLanguage }, set: { preferences.setInterfaceLanguage($0) })) {
-                    ForEach(InterfaceLanguage.allCases) { Text($0.title).tag($0) }
-                }.labelsHidden().pickerStyle(.menu).frame(width: 170).accessibilityIdentifier("interface-language")
-            }
             GroupBox(L("启动")) {
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle(L("开机自启动（登录后运行）"), isOn: Binding(get: { preferences.launchAtLogin || preferences.needsApproval }, set: { preferences.setLaunchAtLogin($0) }))
@@ -732,8 +729,6 @@ struct InteractionSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
             }
-            Toggle(L("快速甩动鼠标时放大主题光标"), isOn: $preferences.shakeToLocate)
-                .help(L("连续快速往返甩动时临时放大，随后恢复。此开关控制 Gallery 的放大效果，系统自带的定位鼠标设置独立生效。"))
             VStack(alignment: .leading, spacing: 16) {
                 GroupBox(L("光标外观 · 当前主题")) {
                   VStack(alignment: .leading, spacing: 12) {
@@ -751,13 +746,22 @@ struct InteractionSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                     if store.editingActiveTheme { Text(L("暂停此主题后可更改外观。")).font(.caption).foregroundStyle(.secondary) }
                   }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                }.disabled(store.editingActiveTheme)
                 GroupBox(L("交互动画")) {
                   VStack(alignment: .leading, spacing: 14) {
-                    Toggle(L("鼠标静止时播放待机动画"), isOn: $store.theme.idleEnabled)
-                    NumericSlider(title: L("默认等待"), value: Binding(get: { store.theme.idleDelay }, set: { store.setDefaultIdleDelay($0) }), range: 1...60, unit: L("秒"), inputRange: 1...600, updatesWhileDragging: false)
-                    Text(L("各角色可在「待机」页单独设置，未设置时使用此默认值。")).font(.caption).foregroundStyle(.secondary)
-                    Toggle(L("播放左键按下、按住与松手动画"), isOn: $store.theme.clickEnabled)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle(L("启用待机动画"), isOn: $store.theme.idleEnabled)
+                        NumericSlider(title: L("默认等待"), value: Binding(get: { store.theme.idleDelay }, set: { store.setDefaultIdleDelay($0) }), range: 1...60, unit: L("秒"), inputRange: 1...600, updatesWhileDragging: false)
+                        Text(L("各角色可在「待机」页单独设置，未设置时使用此默认值。")).font(.caption).foregroundStyle(.secondary)
+                        Toggle(L("启用点按动画"), isOn: $store.theme.clickEnabled)
+                    }.disabled(store.editingActiveTheme)
+                    Toggle(isOn: $preferences.shakeToLocate) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L("摇动鼠标指针以定位"))
+                            Text(L("快速来回移动鼠标指针以放大。")).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .help(L("连续快速往返甩动时临时放大，随后恢复。此开关控制 Gallery 的放大效果，系统自带的定位鼠标设置独立生效。"))
                   }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 GroupBox(L("在这些应用中暂停交互动画")) {
@@ -774,8 +778,29 @@ struct InteractionSettings: View {
                     }
                     Text(L("暂停交互时仍保留常态主题。游戏或使用自定义光标的应用可以加入此列表。")).font(.caption).foregroundStyle(.secondary)
                   }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                }.disabled(store.editingActiveTheme)
+            }.padding(.vertical, 2)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L("界面语言")).font(.callout)
+                    Text(L("重新打开 Gallery 后生效。")).font(.caption).foregroundStyle(.secondary)
                 }
-            }.padding(.vertical, 2).disabled(store.editingActiveTheme)
+                Spacer()
+                Picker(L("界面语言"), selection: Binding(get: { preferences.interfaceLanguage }, set: { preferences.setInterfaceLanguage($0) })) {
+                    ForEach(InterfaceLanguage.allCases) { Text($0.title).tag($0) }
+                }.labelsHidden().pickerStyle(.menu).fixedSize().frame(width: 170, alignment: .trailing).accessibilityIdentifier("interface-language")
+            }.padding(.leading, 10).padding(.trailing, 16)
+            UpdateSettingsSection()
+            if !runtime.unsupportedRoles.isEmpty {
+                GroupBox(L("系统兼容性")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(runtime.unsupportedRoles.keys.sorted(), id: \.self) { id in
+                            Text(NativeCursorCatalog.displayName(id) + "：" + runtime.unsupportedRoles[id]!)
+                                .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             HStack {
                 Button(L("检查输入监控授权")) { runtime.requestInputAccess() }
                 Button(L("打开隐私设置")) { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!) }
@@ -783,7 +808,6 @@ struct InteractionSettings: View {
             Text(L("Gallery 只观察鼠标，不拦截点击、不记录键盘。锁屏、休眠时尽量恢复常态。请先退出 Mousecape 的自动重应用助手，避免两个工具同时修改主题。"))
                 .font(.caption).foregroundStyle(.secondary)
             Text(runtime.diagnostics).font(.caption2.monospaced()).foregroundStyle(.tertiary).textSelection(.enabled)
-            UpdateSettingsSection()
             HStack {
                 Button(L("退出 Gallery")) { NSApp.terminate(nil) }
                     .help(L("保存修改并恢复系统光标后退出。"))

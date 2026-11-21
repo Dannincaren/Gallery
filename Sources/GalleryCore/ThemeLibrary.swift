@@ -23,7 +23,7 @@ public struct LibraryTheme: Codable, Equatable, Identifiable, Sendable {
     public init(id: String = UUID().uuidString, theme: GalleryTheme) {
         self.id = id; name = theme.name; appearance = theme.appearance
         var names = Set<String>()
-        roles = theme.roles.filter { names.insert(CursorCatalog.family($0.id)).inserted }.map(LibraryRole.init)
+        roles = theme.roles.filter { names.insert(theme.roleFamily($0.id)).inserted }.map(LibraryRole.init)
     }
 }
 
@@ -88,7 +88,7 @@ public enum ThemeLibrary {
         return row
     }
     public static func loadIndex(at url: URL) throws -> [LibraryTheme] {
-        let rows = try JSONDecoder().decode([LibraryTheme].self, from: Data(contentsOf: url))
+        let rows = try JSONDecoder().decode([LibraryTheme].self, from: BoundedFile.read(url, limit: 80_000_000))
         guard rows.count <= 200, Set(rows.map(\.id)).count == rows.count,
               rows.allSatisfy({ UUID(uuidString: $0.id) != nil }) else { throw ThemeError.invalid(L("主题目录索引无效。")) }
         return rows
@@ -100,7 +100,7 @@ public enum ThemeLibrary {
     public static func applyTemplate(_ template: CursorRole, sourceName: String, to identifier: String, in theme: inout GalleryTheme) throws {
         guard let target = theme.roles.first(where: { $0.id == identifier }) else { throw ThemeError.invalid(L("找不到目标光标。")) }
         var updated = theme
-        for index in updated.roles.indices where CursorCatalog.family(updated.roles[index].id) == CursorCatalog.family(target.id) {
+        for index in updated.roles.indices where updated.roleFamily(updated.roles[index].id) == updated.roleFamily(target.id) {
             updated.roles[index].clips = template.clips
             updated.roles[index].variants = template.variants
             updated.roles[index].selectedVariants = template.selectedVariants

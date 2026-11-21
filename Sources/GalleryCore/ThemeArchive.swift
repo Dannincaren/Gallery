@@ -16,7 +16,9 @@ struct ThemeArchive: Codable {
     var clickEnabled: Bool
     var excludedBundleIDs: [String]
     var roles: [Role]
+    var mapping: Mapping?
     var images: [String: Data]
+    struct Mapping: Codable { var sources: [Role]; var bindings: [String: RoleMappingChoice]; var detailedNativeRoles: Bool?; var importBindings: [String: RoleMappingChoice]? }
     struct Role: Codable {
         var id: String
         var name: String
@@ -53,13 +55,15 @@ struct ThemeArchive: Codable {
             let keys = clip.frames.map(imageKey)
             return Clip(frames: keys, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
         }
-        roles = theme.roles.map { role in
+        func archiveRole(_ role: CursorRole) -> Role {
             let clips = role.clips.mapValues(archive)
             let variants = role.variants.mapValues { $0.map { Variant(id: $0.id, name: $0.name, clip: archive($0.clip)) } }
             return Role(id: role.id, name: role.name, splitClickAnimation: role.splitClickAnimation,
                         scale: role.scale, usesNative: role.usesNative, sourceThemeName: role.sourceThemeName, idleDelayOverride: role.idleDelayOverride,
                         clips: clips, variants: variants.isEmpty ? nil : variants, selectedVariants: role.selectedVariants.isEmpty ? nil : role.selectedVariants)
         }
+        roles = theme.roles.map(archiveRole)
+        mapping = theme.mapping.map { Mapping(sources: $0.sources.map(archiveRole), bindings: $0.bindings, detailedNativeRoles: $0.detailedNativeRoles, importBindings: $0.importBindings) }
         if let cover = theme.coverFrame {
             coverFrame = imageKey(cover)
         } else { coverFrame = nil }
@@ -75,14 +79,25 @@ struct ThemeArchive: Codable {
             }
             return CursorClip(frames: frames, frameDuration: clip.frameDuration, width: clip.width, height: clip.height, hotX: clip.hotX, hotY: clip.hotY)
         }
-        let decoded = try roles.map { role -> CursorRole in
+        func restoreRole(_ role: Role) throws -> CursorRole {
+            guard role.clips.count <= Motion.allCases.count, role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }),
+                  (role.variants ?? [:]).count <= Motion.allCases.count,
+                  (role.variants ?? [:]).allSatisfy({ Motion(rawValue: $0.key) != nil && $0.value.count <= 32 }) else {
+                throw ThemeError.invalid(L("素材选项或所选版本无效。"))
+            }
             let clips = try role.clips.mapValues(restore)
             let variants = try (role.variants ?? [:]).mapValues { try $0.map { CursorVariant(id: $0.id, name: $0.name, clip: try restore($0.clip)) } }
             return CursorRole(id: role.id, name: role.name, clips: clips, splitClickAnimation: role.splitClickAnimation,
                               scale: role.scale ?? 1, usesNative: role.usesNative ?? false, sourceThemeName: role.sourceThemeName, idleDelayOverride: role.idleDelayOverride,
                               variants: variants, selectedVariants: role.selectedVariants ?? [:])
         }
+        let decoded = try roles.map(restoreRole)
         var theme = GalleryTheme(name: name, author: author, roles: decoded)
+        if let mapping {
+            guard mapping.sources.count <= 80 else { throw ThemeError.invalid(L("主题资源数量无效。")) }
+            theme.mapping = ThemeMapping(sources: try mapping.sources.map(restoreRole), bindings: mapping.bindings,
+                                         detailedNativeRoles: mapping.detailedNativeRoles ?? false, importBindings: mapping.importBindings)
+        }
         theme.pointerScale = pointerScale ?? 1
         theme.appearance = appearance ?? CursorAppearance()
         if let coverFrame {

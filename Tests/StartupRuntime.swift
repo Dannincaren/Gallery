@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import GalleryCore
 
 // Observe startup decisions without linking the native cursor bridge or
@@ -6,7 +7,9 @@ import GalleryCore
 @MainActor final class CursorRuntime: ObservableObject {
     @Published private(set) var enabled = false
     @Published private(set) var status = "Isolated startup check"
+    let statusDisplay = RuntimeStatus("Isolated startup check")
     @Published var error: String?
+    var unsupportedRoles: [String: String] { [:] }
     var hasRecovery = false
     private(set) var starts: [String] = []
     private(set) var shakeEnabled = false

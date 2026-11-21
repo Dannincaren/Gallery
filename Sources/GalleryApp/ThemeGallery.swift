@@ -178,7 +178,7 @@ struct ThemeShowcaseCard<Actions: View>: View {
             .overlay(alignment: .topTrailing) {
                 Group {
                     if GalleryLocalization.isEnglish {
-                        Text("I\nN\n \nU\nS\nE").font(.system(size: 10, weight: .semibold))
+                        Text("I\nN\n \nU\nS\nE").font(.system(size: 10, weight: .heavy))
                             .multilineTextAlignment(.center).lineSpacing(3)
                     } else {
                         VStack(spacing: 3) {

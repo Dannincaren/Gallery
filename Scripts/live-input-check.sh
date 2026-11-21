@@ -7,9 +7,9 @@ swift build --disable-sandbox --cache-path .build/cache --config-path .build/con
 bin_path="$(swift build --disable-sandbox -c release --show-bin-path)"
 mkdir -p .build/live-check
 swiftc -O -module-cache-path "$PWD/.build/ModuleCache" -swift-version 5 -target "$(uname -m)-apple-macosx14.0" -D GALLERY_RUNTIME_CHECKS -parse-as-library -I "$bin_path/Modules" -I "$bin_path/GalleryNative.build" \
-    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/SystemCursorRenderer.swift \
+    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/RuntimeStatus.swift Sources/GalleryApp/WaitCursorOverlay.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/SystemCursorRenderer.swift \
     Sources/GalleryApp/CursorRecognition.swift Sources/GalleryApp/PreparedCursor.swift Sources/GalleryApp/SystemSceneMonitor.swift Tests/LiveInputHarness.swift \
-    "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build/CursorBridge.m.o" \
+    "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build"/*.o \
     -framework AppKit -framework ApplicationServices -o .build/live-check/LiveInputChecks
 python3 - "$1" "$2" "${3:-}" <<'PY'
 import pathlib,sys,plistlib,json,shutil

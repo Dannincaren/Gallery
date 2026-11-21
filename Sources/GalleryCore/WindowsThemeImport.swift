@@ -76,7 +76,7 @@ public enum WindowsThemeImport {
             guard size <= 40_000_000, total <= 80_000_000, files.count < 1000 else { throw ThemeError.invalid(L("文件夹的光标素材过多或超过 80 MB，请拆分主题。")) }
             let path = file.standardizedFileURL.path
             guard path.hasPrefix(base.path + "/") else { throw ThemeError.invalid(L("素材不在选中的文件夹内。")) }
-            files[String(path.dropFirst(base.path.count + 1))] = try Data(contentsOf: file)
+            files[String(path.dropFirst(base.path.count + 1))] = try BoundedFile.read(file, limit: min(40_000_000, 80_000_000 - (total - size)))
         }
         if let scanError { throw scanError }
         if !files.keys.contains(where: { ["cur", "ani"].contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }) {
@@ -135,7 +135,7 @@ public enum WindowsThemeImport {
             return result
         }
         process.arguments = arguments + [url.path] + (literal.map { [$0] } ?? [])
-        process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+        process.standardOutput = pipe; process.standardError = FileHandle.nullDevice; process.standardInput = FileHandle.nullDevice
         let output: FileHandle?
         if let destination {
             guard FileManager.default.createFile(atPath: destination.path, contents: nil) else { throw ThemeError.invalid(L("无法创建临时安装包。")) }
@@ -143,7 +143,10 @@ public enum WindowsThemeImport {
         } else { output = nil }
         defer { try? output?.close() }
         try process.run()
+        let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 180, execute: timeout)
         defer {
+            timeout.cancel()
             try? pipe.fileHandleForReading.close()
             if process.isRunning { process.terminate(); process.waitUntilExit() }
         }
@@ -274,7 +277,7 @@ public enum WindowsThemeImport {
         }
         guard roles.count <= 80 else { throw ThemeError.invalid(L("光标角色和未分类素材超过 80 项，请拆分安装包。")) }
         let result = GalleryTheme(name: scheme, author: "用户本地导入", roles: roles)
-        try result.validate(); return result
+        try result.validate(); try CursorImages.validateResources(result); return result
     }
     private static func filename(_ path: String) -> String { path.replacingOccurrences(of: "\\", with: "/").components(separatedBy: "/").last ?? path }
     private static func matches(_ asset: String, reference: String) -> Bool {

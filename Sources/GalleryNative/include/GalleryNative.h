@@ -11,6 +11,22 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) CGPoint hotSpot;
 @property(nonatomic, readonly) int32_t seed;
 @end
+
+/// Read-only WindowServer responsiveness notifications. The observer configures
+/// only this application's connection; no cursor resources or other apps change.
+@interface GLBusyObservation : NSObject
++ (nullable instancetype)observeChanges:(void (^)(void))changed;
++ (nullable instancetype)observeChanges:(void (^)(void))changed timeout:(NSTimeInterval)timeout;
+- (BOOL)isUnresponsive:(int32_t)pid;
+- (void)invalidate;
+@end
+
+/// Read-only Mission Control entry/exit and Space completion; no event payloads.
+@interface GLSceneObservation : NSObject
++ (nullable instancetype)observeChanges:(void (^)(int32_t type))changed;
+- (void)invalidate;
+@end
+
 @interface GLCursorBridge : NSObject
 + (BOOL)available;
 + (NSString *)diagnostics;
@@ -32,6 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (int32_t)cursorSeed;
 + (nullable NSDictionary<NSString *, id> *)standardCursor:(NSString *)identifier;
 + (int32_t)setBackgroundCursorUpdates:(BOOL)enabled;
++ (int32_t)moveOverlayWindow:(int32_t)window origin:(CGPoint)origin;
 + (int32_t)clearCoreCursorCache;
 @end
 NS_ASSUME_NONNULL_END

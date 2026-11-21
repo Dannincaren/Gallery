@@ -8,8 +8,8 @@ bin_path="$(swift build --disable-sandbox -c release --show-bin-path)"
 mkdir -p .build/editor-check
 swiftc -O -module-cache-path "$PWD/.build/ModuleCache" -swift-version 5 -target "$(uname -m)-apple-macosx14.0" -parse-as-library -I "$bin_path/Modules" -I "$bin_path/GalleryNative.build" \
     Sources/GalleryApp/Store.swift Sources/GalleryApp/ThemeReadCache.swift Sources/GalleryApp/Demo.swift Sources/GalleryApp/AppPreferences.swift \
-    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/SystemCursorRenderer.swift \
+    Sources/GalleryApp/Runtime.swift Sources/GalleryApp/RuntimeStatus.swift Sources/GalleryApp/WaitCursorOverlay.swift Sources/GalleryApp/MouseObservation.swift Sources/GalleryApp/SystemCursorRenderer.swift \
     Sources/GalleryApp/CursorRecognition.swift Sources/GalleryApp/PreparedCursor.swift Sources/GalleryApp/SystemSceneMonitor.swift Tests/EditorHarness.swift \
-    "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build/CursorBridge.m.o" \
+    "$bin_path"/GalleryCore.build/*.swift.o "$bin_path/GalleryNative.build"/*.o \
     -framework AppKit -framework ApplicationServices -framework ServiceManagement -o .build/editor-check/GalleryEditorChecks
 .build/editor-check/GalleryEditorChecks "$1"

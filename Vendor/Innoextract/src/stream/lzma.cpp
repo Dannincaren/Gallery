@@ -32,13 +32,18 @@ namespace stream {
 static lzma_stream * init_raw_lzma_stream(lzma_vli filter, lzma_options_lzma & options) {
 	
 	options.preset_dict = NULL;
+	// Gallery adaptation: reject attacker-controlled multi-gigabyte dictionaries
+	// before allocating the decoder. Normal Inno cursor packages fit this bound.
+	const lzma_filter filters[2] = { { filter, &options }, { LZMA_VLI_UNKNOWN, NULL } };
+	if(lzma_raw_decoder_memusage(filters) > 256 * 1024 * 1024) {
+		throw lzma_error("Cursor decoder memory limit exceeded", LZMA_MEMLIMIT_ERROR);
+	}
 	
 	lzma_stream * strm = new lzma_stream;
 	lzma_stream tmp = LZMA_STREAM_INIT;
 	*strm = tmp;
 	strm->allocator = NULL;
 	
-	const lzma_filter filters[2] = { { filter,  &options }, { LZMA_VLI_UNKNOWN, NULL } };
 	lzma_ret ret = lzma_raw_decoder(strm, filters);
 	if(ret != LZMA_OK) {
 		delete strm;
@@ -98,7 +103,7 @@ bool inno_lzma1_decompressor_impl::filter(const char * & begin_in, const char * 
 			header[nread++] = *begin_in++;
 		}
 		
-		lzma_options_lzma options;
+		lzma_options_lzma options = {};
 		
 		boost::uint8_t properties = boost::uint8_t(header[0]);
 		if(properties > (9 * 5 * 5)) {
@@ -126,7 +131,7 @@ bool inno_lzma2_decompressor_impl::filter(const char * & begin_in, const char * 
 			return true;
 		}
 		
-		lzma_options_lzma options;
+		lzma_options_lzma options = {};
 		
 		boost::uint8_t prop = boost::uint8_t(*begin_in++);
 		if(prop > 40) {

@@ -16,7 +16,9 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Check imports and interaction behavior
         run: bash Scripts/check.sh
       - name: Check native English and Chinese localization
@@ -29,7 +31,9 @@ jobs:
         env:
           GALLERY_UNIVERSAL: '1'
         run: bash Scripts/build.sh
-      - uses: actions/upload-artifact@v4
+      - name: Check bounded native LZMA decoding
+        run: bash Scripts/lzma-check.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Gallery-macOS
           path: dist/Gallery-macOS.zip

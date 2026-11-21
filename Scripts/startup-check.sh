@@ -14,7 +14,7 @@ cp Resources/Info.plist "$gallery_check/Info.plist"
 swiftc -O -module-cache-path "$PWD/.build/ModuleCache" -swift-version 5 -target "$(uname -m)-apple-macosx14.0" -parse-as-library \
     -I "$gallery_bin/Modules" Sources/GalleryApp/AppDelegate.swift Sources/GalleryApp/Store.swift \
     Sources/GalleryApp/ThemeReadCache.swift Sources/GalleryApp/Demo.swift Sources/GalleryApp/AppPreferences.swift \
-    Tests/StartupRuntime.swift Tests/StartupHarness.swift "$gallery_bin"/GalleryCore.build/*.swift.o \
+    Sources/GalleryApp/RuntimeStatus.swift Tests/StartupRuntime.swift Tests/StartupHarness.swift "$gallery_bin"/GalleryCore.build/*.swift.o \
     -framework AppKit -framework ServiceManagement -o "$gallery_check/MacOS/Gallery"
 codesign --force --sign - "$gallery_check/.."
 for gallery_scenario in normal late-binding no-auto keep-dock missing-last recovery pending-document; do

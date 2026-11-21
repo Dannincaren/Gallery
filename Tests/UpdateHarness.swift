@@ -66,10 +66,15 @@ struct UpdateHarness {
         let offline = AppUpdateChecker(currentVersion: "1.0.1", session: session(failure: URLError(.notConnectedToInternet)))
         offline.check(); try await finish(offline)
         guard case .failed = offline.state else { throw ThemeError.invalid("Offline failure was lost") }
+        let oversized = AppUpdateChecker(currentVersion: "1.0.1", session: session())
+        ReleaseProtocol.body = Data(repeating: 0x20, count: 2 * 1024 * 1024 + 1)
+        oversized.check(); try await finish(oversized)
+        guard case .failed = oversized.state else { throw ThemeError.invalid("Unbounded release metadata was accepted") }
         let cancelled = AppUpdateChecker(currentVersion: "1.0.1", session: session(hold: true))
         cancelled.check(); try await Task.sleep(nanoseconds: 20_000_000); cancelled.cancel()
         try await Task.sleep(nanoseconds: 20_000_000)
         guard case .idle = cancelled.state else { throw ThemeError.invalid("Cancelled response replaced idle state") }
-        print("PASS manual-only updates, trusted endpoint, single flight, new/current versions, HTTP/offline failures and cancellation")
+        print("PASS manual-only updates, trusted endpoint, single flight, new/current versions, HTTP/offline failures, streamed metadata limit and cancellation")
+        try await checkDownloads()
     }
 }

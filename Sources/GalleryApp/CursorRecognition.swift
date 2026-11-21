@@ -19,7 +19,11 @@ struct CursorAnimationImages: Sendable {
     }
     init?(images: [CGImage], count: Int, size: CGSize, hotSpot: CGPoint) {
         guard count > 1 else { return nil }
-        let samples = Set([0, count / 2, count - 1]).sorted().map { index in
+        // A repeated idle pose can occupy all three former sample positions
+        // while the remaining frames belong to a different segment/order.
+        // Verify the whole bounded strip before acknowledging its seed. This
+        // runs on the recognition worker only when the resource seed changes.
+        let samples = (0..<count).map { index in
             Sample(index: index, images: images.compactMap { image in
                 guard image.height % count == 0,
                       let frame = image.cropping(to: CGRect(x: 0, y: index * (image.height / count), width: image.width, height: image.height / count)) else { return nil }
@@ -30,22 +34,28 @@ struct CursorAnimationImages: Sendable {
         self.count = count; self.samples = samples
     }
     func matches(image: CGImage, size: CGSize, hotSpot: CGPoint) -> Bool {
-        guard count > 1, image.height % count == 0 else { return false }
-        let height = image.height / count, pointsHigh = size.height / Double(count)
-        guard height > 0, pointsHigh > hotSpot.y else { return false }
-        return samples.allSatisfy { sample in
-            guard let frame = image.cropping(to: CGRect(x: 0, y: sample.index * height, width: image.width, height: height)),
-                  let actual = CursorFingerprint(image: frame, width: size.width, height: pointsHigh, hotX: hotSpot.x, hotY: hotSpot.y) else { return false }
-            return sample.images.contains { actual.matches($0) }
+        guard let actual = Self.observation(image: image, size: size, hotSpot: hotSpot, count: count) else { return false }
+        return matches(actual)
+    }
+    static func observation(image: CGImage, size: CGSize, hotSpot: CGPoint, count: Int) -> Self? {
+        guard count > 1, image.height % count == 0, size.height / Double(count) > hotSpot.y else { return nil }
+        return Self(images: [image], count: count, size: CGSize(width: size.width, height: size.height / Double(count)), hotSpot: hotSpot)
+    }
+    func matches(_ actual: Self) -> Bool {
+        guard count == actual.count else { return false }
+        return zip(samples, actual.samples).allSatisfy { expected, sample in
+            expected.index == sample.index && sample.images.contains { observed in expected.images.contains { observed.matches($0) } }
         }
     }
 }
 
 struct CursorRecoveryImages: Sendable {
     struct Frame: Sendable { let releaseIndex: Int?; let images: [CursorFingerprint] }
+    struct Loop: Sendable { let role: String; let images: CursorAnimationImages }
     let role: String
     var releasing: Bool
     let frames: [Frame]
+    var loops: [Loop] = []
 }
 
 /// One worker, one in-flight request. Cached immutable WindowServer seeds
@@ -101,8 +111,24 @@ final class CursorRecognition: @unchecked Sendable {
                     return
                 }
                 captureMisses.removeValue(forKey: snapshot.seed)
-                if nativeAnimation?.matches(image: snapshot.image, size: snapshot.size, hotSpot: snapshot.hotSpot) == true {
+                var animationSamples: [Int: CursorAnimationImages] = [:]
+                var invalidAnimationCounts = Set<Int>()
+                func matchesAnimation(_ expected: CursorAnimationImages) -> Bool {
+                    let count = expected.count
+                    if animationSamples[count] == nil && !invalidAnimationCounts.contains(count) {
+                        animationSamples[count] = CursorAnimationImages.observation(image: snapshot.image, size: snapshot.size, hotSpot: snapshot.hotSpot, count: count)
+                        if animationSamples[count] == nil { invalidAnimationCounts.insert(count) }
+                    }
+                    return animationSamples[count].map { expected.matches($0) } ?? false
+                }
+                if nativeAnimation.map(matchesAnimation) == true {
                     completion(snapshot.seed, nil, true, nil); return
+                }
+                if let recovery = nativeRecovery, let stale = recovery.loops.first(where: { matchesAnimation($0.images) }) {
+                    // A foreground app can reselect its cached idle/hold strip
+                    // after mouse-up. Identify its owner, but never acknowledge
+                    // it as the current press/release or restart that timeline.
+                    completion(snapshot.seed, CursorIdentification(roles: [stale.role]), false, nil); return
                 }
                 // One immutable snapshot, one fingerprint, shared by the
                 // current frame, historical frame and semantic-role checks.

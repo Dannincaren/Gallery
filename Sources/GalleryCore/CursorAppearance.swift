@@ -6,6 +6,14 @@ public struct CursorAppearance: Codable, Equatable, Sendable {
     public var shadow = false
     public var pixelArt = false
     public var effectiveSmoothEdges: Bool { smoothEdges && !pixelArt }
+    public func geometry(of original: CursorClip) -> CursorClip {
+        guard shadow else { return original }
+        let factor = min(1, 120 / max(original.width, original.height))
+        var clip = original
+        clip.width = original.width * factor + 8; clip.height = original.height * factor + 8
+        clip.hotX = original.hotX * factor + 4; clip.hotY = original.hotY * factor + 4
+        return clip
+    }
     public init(smoothEdges: Bool = true, shadow: Bool = false, pixelArt: Bool = false) {
         self.smoothEdges = smoothEdges; self.shadow = shadow; self.pixelArt = pixelArt
     }
@@ -30,9 +38,7 @@ public struct CursorAppearanceRenderer {
         try original.validate()
         let padding = 4.0
         let factor = min(1, (128 - padding * 2) / max(original.width, original.height))
-        var clip = original
-        clip.width = original.width * factor + padding * 2; clip.height = original.height * factor + padding * 2
-        clip.hotX = original.hotX * factor + padding; clip.hotY = original.hotY * factor + padding
+        var clip = appearance.geometry(of: original)
         clip.frames = try original.frames.map { data in
             let key = Key(data: data, width: original.width, height: original.height)
             if let cached = frames[key] { return cached }

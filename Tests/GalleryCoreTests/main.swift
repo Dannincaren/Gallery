@@ -22,7 +22,36 @@ func require<T>(_ value: T?) throws -> T {
 let interaction = InteractionTests(), imports = ImportTests()
 let regression = RegressionTests()
 let roleInteraction = RoleInteractionTests()
+let renderPolicy = RenderPolicyTests()
+let nativeLoops = NativeLoopTests()
 var checks: [(String, () throws -> Void)] = [
+    ("untrusted geometry, identifiers, cape counts and CUR dimensions", SecurityTests().testGeometryAndIdentifiers),
+    ("decoded image budget rejects bombs and preserves shared aliases", SecurityTests().testCumulativeImageBudgetAndSharedFrames),
+    ("bounded input rejects links, named pipes and oversized files", SecurityTests().testBoundedFilesRejectLinksSpecialFilesAndOversize),
+    ("large ANI samples before decode with original timing", SecurityTests().testLongANISelectsBeforeDecodeWithoutChangingTiming),
+    ("size controls share rendered logical geometry and both scale factors", ScaleAndSwitchTests().testScaleBoundsFollowGeometryAndBothFactors),
+    ("activation waits four seconds and deactivation one without postponing unlock", ScaleAndSwitchTests().testDirectionalSwitchGateDoesNotExtendOnRepeatedClicks),
+    ("import reset preserves directional aliases and survives archive round trips", MappingTests().testImportResetRetainsAliasesDirectionsAndArchiveSnapshot),
+    ("mapping copies isolate destination size, hotspot, variants and animation phases", MappingTests().testIndependentCopiesAndVariantPhases),
+    ("unused mapping materials, portable archives and shared image pool", MappingTests().testUnusedDeletionAndPortablePool),
+    ("mapping replacement, unbinding, legacy defaults and invalid references", MappingTests().testReplaceRemoveAndInvalidReferences),
+    ("mapping layout keeps native order, local alignment and non-overlapping cards", MappingTests().testStableAlignmentAndExpandedBounds),
+    ("mapping moves native groups only after source placement to remove crossings", MappingTests().testTwoSidedPlacementRemovesCrossings),
+    ("mapping preserves ordered connections and spacing through repeated binding changes", MappingTests().testTwoSidedPlacementStaysOrderedDuringBindingChanges),
+    ("mapping detailed native destinations and legacy metadata migration", MappingTests().testDetailedNativeDestinationsAndMigration),
+    ("deleting unused materials compacts only the local archive", MappingTests().testDeletionActuallyCompactsLocalArchive),
+    ("mapping accepts a full variant shelf without adding an overflowing copy", MappingTests().testFullVariantShelfKeepsOriginalWithoutOverflow),
+    ("official update assets, bounded sizes, renamed repositories and checksums", ReleaseTests().testDownloadAssetsAndChecksums),
+    ("native playback keeps press/release and resize separate", nativeLoops.testEligibilityKeepsOneShotAndResizePathsSeparate),
+    ("sparse normal poses keep source timing without segmented native restarts", nativeLoops.testSparseNormalClipsUseVisibleChangesWithoutSegmentRestarts),
+    ("short native loops retain full phase and frame order", nativeLoops.testShortLoopsKeepTheEntireRotatedCycle),
+    ("long native windows preserve every frame across overlap and wrap", nativeLoops.testLongWindowsPreserveEverySourceFrameAcrossWraps),
+    ("native preparation lead preserves source timing with bounded work", nativeLoops.testPreparationLeadIsBoundedAndRetainsFrameTiming),
+    ("raster cache preserves the display grid and shares equivalent scales", renderPolicy.testRasterGeometryPreservesDisplayGridAndSharesNearbyScales),
+    ("long animation cache fits within a hard memory bound", renderPolicy.testLongLoopBudgetFitsAndHasAHardBound),
+    ("confirmation misses back off without overlapping captures", renderPolicy.testConfirmationMissesBackOffWithoutConcurrentProbes),
+    ("new image seeds and submissions bypass confirmation backoff", renderPolicy.testNewSeedAndSubmissionBypassConfirmationBackoff),
+    ("button edges restart confirmation and movement never postpones it", renderPolicy.testButtonEdgeCanRestartConfirmationImmediately),
     ("unsplit press cannot trigger another role's release", roleInteraction.testUnsplitPressDoesNotReleaseAnotherRole),
     ("mouse-up and release duration belong to the mouse-down role", roleInteraction.testMouseUpOnlyReleasesTheDownRole),
     ("role round trips and aliases retain their own click epoch", roleInteraction.testRoleRoundTripAndAliasesKeepOwnEpoch),

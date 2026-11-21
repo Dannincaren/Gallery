@@ -20,6 +20,11 @@ final class GalleryStore: ObservableObject {
     @Published private(set) var library: [LibraryTheme] = []
     @Published private(set) var selectedThemeID: String
     @Published private(set) var activeThemeID: String?
+    @Published private(set) var switchingTheme = false
+    @Published private(set) var mappingEditorOpen = false
+    private var mappingEditors = Set<UUID>()
+    private var switchCooldown = ThemeSwitchCooldown()
+    private var pendingSwitchUnlock: DispatchWorkItem?
     let runtime: CursorRuntime
     let preferences = AppPreferences()
     private let root: URL
@@ -124,25 +129,45 @@ final class GalleryStore: ObservableObject {
     }
     func isActiveTheme(_ id: String) -> Bool { runtime.enabled && activeThemeID == id }
     var editingActiveTheme: Bool { isActiveTheme(selectedThemeID) }
+    var canEditMapping: Bool { !editingActiveTheme && !importing }
+    var canSwitchTheme: Bool { !switchingTheme && !mappingEditorOpen && !importing }
+    func beginMappingEditor(_ id: UUID) -> Bool {
+        guard canEditMapping else { return false }
+        mappingEditors.insert(id); mappingEditorOpen = true; return true
+    }
+    func endMappingEditor(_ id: UUID) { mappingEditors.remove(id); mappingEditorOpen = !mappingEditors.isEmpty }
+    private func beginThemeSwitch(_ action: ThemeSwitchCooldown.Action) -> Bool {
+        let time = ProcessInfo.processInfo.systemUptime
+        guard canSwitchTheme, switchCooldown.begin(action, at: time) else { return false }
+        switchingTheme = true
+        pendingSwitchUnlock?.cancel()
+        let unlock = DispatchWorkItem { [weak self] in self?.switchingTheme = false }
+        pendingSwitchUnlock = unlock; DispatchQueue.main.asyncAfter(deadline: .now() + max(0, switchCooldown.deadline - time), execute: unlock)
+        return true
+    }
+    func stopTheme() {
+        guard runtime.enabled, beginThemeSwitch(.deactivate) else { return }
+        _ = runtime.stop()
+    }
     func applyCurrentTheme() {
-        guard !importing else { return }
+        guard canSwitchTheme else { return }
         saveNow(wait: true)
-        guard saveStatus == L("已保存在本机"), runtime.stop() else { return }
+        guard saveStatus == L("已保存在本机"), beginThemeSwitch(.activate), runtime.stop() else { return }
         runtime.start(theme)
         activeThemeID = runtime.enabled ? selectedThemeID : nil
         if runtime.enabled && selectionDefaults { UserDefaults.standard.set(selectedThemeID, forKey: "lastAppliedThemeID") }
     }
     var visibleRoles: [CursorRole] {
         var seen = Set<String>()
-        return theme.roles.filter { seen.insert(CursorCatalog.family($0.id)).inserted }
+        return theme.roles.filter { seen.insert(theme.roleFamily($0.id)).inserted }
     }
     var roleIndex: Int? { theme.roles.firstIndex { $0.id == selectedRole } }
     var clip: CursorClip? { roleIndex.flatMap { theme.roles[$0].clip(selectedMotion) } }
     func edit(_ action: (inout CursorClip) -> Void) {
         guard !editingActiveTheme, let index = roleIndex, var clip else { return }
         action(&clip)
-        let family = CursorCatalog.family(theme.roles[index].id)
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
+        let family = theme.roleFamily(theme.roles[index].id)
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func duplicateFrame(at index: Int) -> Int? {
@@ -167,8 +192,8 @@ final class GalleryStore: ObservableObject {
         changed()
     }
     private func copyVariants(_ role: CursorRole, motion: Motion) {
-        let family = CursorCatalog.family(role.id), key = motion.rawValue
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family {
+        let family = theme.roleFamily(role.id), key = motion.rawValue
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family {
             theme.roles[i].clips[key] = role.clips[key]
             theme.roles[i].variants[key] = role.variants[key]
             theme.roles[i].selectedVariants[key] = role.selectedVariants[key]
@@ -195,14 +220,14 @@ final class GalleryStore: ObservableObject {
     }
     func createClip() {
         guard !editingActiveTheme, let index = roleIndex else { return }
-        let family = CursorCatalog.family(theme.roles[index].id), clip = theme.roles[index].clip(.normal)
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
+        let family = theme.roleFamily(theme.roles[index].id), clip = theme.roles[index].clip(.normal)
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = clip }
         changed()
     }
     func removeClip() {
         guard !editingActiveTheme, selectedMotion != .normal, let index = roleIndex else { return }
-        let family = CursorCatalog.family(theme.roles[index].id)
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
+        let family = theme.roleFamily(theme.roles[index].id)
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].clips.removeValue(forKey: selectedMotion.rawValue) }
         changed()
     }
     private func refreshEntry() {
@@ -338,7 +363,7 @@ final class GalleryStore: ObservableObject {
         }
     }
     func selectTheme(_ id: String, role: String? = nil, activate: Bool = false) {
-        guard !importing else { return }
+        guard !importing, !activate || canSwitchTheme else { return }
         if id == selectedThemeID {
             if let role { selectedRole = role }
             if activate { applyCurrentTheme() }; return
@@ -536,26 +561,41 @@ final class GalleryStore: ObservableObject {
     }
     func setThemeScale(_ value: Double) {
         guard value.isFinite else { return }
-        let value = min(3, max(0.25, value))
+        let value = themeScaleLimits.clamp(value)
         guard theme.pointerScale != value else { return }
         theme.pointerScale = value
         // Browsing another collection must not resize the applied theme.
         if runtime.enabled && activeThemeID == selectedThemeID { runtime.setScale(value) }
         changed()
     }
+    var themeScaleLimits: CursorScaleLimits { CursorScaleLimits(roles: theme.roles, appearance: theme.appearance, themeScale: theme.pointerScale) }
+    func roleScaleLimits(_ id: String) -> CursorScaleLimits {
+        CursorScaleLimits(roles: theme.roles, appearance: theme.appearance, themeScale: theme.pointerScale, roleID: id)
+    }
+    func applyMapping(_ mapping: ThemeMapping, to themeID: String, deleteUnused: Bool) throws {
+        guard selectedThemeID == themeID, !importing else {
+            throw ThemeError.invalid(L("浏览的主题已改变，请重新打开映射窗口。"))
+        }
+        guard canEditMapping else { throw ThemeError.invalid(L("请先停用主题，再编辑映射。")) }
+        let updated = try mapping.applying(to: theme, deleteUnused: deleteUnused)
+        guard updated != theme else { return }
+        theme = updated
+        if !theme.roles.contains(where: { $0.id == selectedRole }) { selectedRole = theme.roles[0].id }
+        changed(); saveNow()
+    }
     func setRoleScale(_ value: Double, for identifier: String? = nil) {
         guard value.isFinite, let index = theme.roles.firstIndex(where: { $0.id == (identifier ?? selectedRole) }) else { return }
-        let family = CursorCatalog.family(theme.roles[index].id), value = min(3, max(0.25, value))
-        guard theme.roles.contains(where: { CursorCatalog.family($0.id) == family && $0.scale != value }) else { return }
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].scale = value }
+        let family = theme.roleFamily(theme.roles[index].id), value = roleScaleLimits(theme.roles[index].id).clamp(value)
+        guard theme.roles.contains(where: { theme.roleFamily($0.id) == family && $0.scale != value }) else { return }
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].scale = value }
         if activeThemeID == selectedThemeID { runtime.setRoleScale(value, for: theme.roles[index].id) }
         changed()
     }
     func setRoleIdleDelay(_ value: Double?, for identifier: String) {
         guard value == nil || (value!.isFinite && (1...600).contains(value!)) else { return }
-        let family = CursorCatalog.family(identifier)
-        guard theme.roles.contains(where: { CursorCatalog.family($0.id) == family && $0.idleDelayOverride != value }) else { return }
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].idleDelayOverride = value }
+        let family = theme.roleFamily(identifier)
+        guard theme.roles.contains(where: { theme.roleFamily($0.id) == family && $0.idleDelayOverride != value }) else { return }
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].idleDelayOverride = value }
         if activeThemeID == selectedThemeID { runtime.setRoleIdleDelay(value, for: identifier) }
         changed()
     }
@@ -571,8 +611,8 @@ final class GalleryStore: ObservableObject {
     }
     func setUsesNative(_ value: Bool) {
         guard !editingActiveTheme, let index = roleIndex else { return }
-        let family = CursorCatalog.family(theme.roles[index].id)
-        for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].usesNative = value }
+        let family = theme.roleFamily(theme.roles[index].id)
+        for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].usesNative = value }
         changed()
     }
     func useTemplate(_ role: CursorRole, sourceName: String) {
@@ -648,8 +688,8 @@ final class GalleryStore: ObservableObject {
             }
             result.frames = (append ? old.frames : []) + newFrames
             try result.validate()
-            let family = CursorCatalog.family(theme.roles[index].id)
-            for i in theme.roles.indices where CursorCatalog.family(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = result }
+            let family = theme.roleFamily(theme.roles[index].id)
+            for i in theme.roles.indices where theme.roleFamily(theme.roles[i].id) == family { theme.roles[i].clips[selectedMotion.rawValue] = result }
             changed()
         } catch { message = error.localizedDescription }
     }

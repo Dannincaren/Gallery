@@ -23,6 +23,7 @@ struct GalleryApp: App {
             print("No cursor resources were changed.")
             exit(GLCursorBridge.available() ? 0 : 2)
         }
+        #if GALLERY_RUNTIME_CHECKS
         if let index = CommandLine.arguments.firstIndex(of: "--native-roundtrip"), CommandLine.arguments.count > index + 1 {
             // Explicit developer check: re-register an identical arrow, then
             // restore the exact original dictionary. Write a recovery copy first.
@@ -62,6 +63,8 @@ struct GalleryApp: App {
             }
             exit(1)
         }
+        #endif
+        NativeMappingArtwork.prewarm()
         let store = GalleryStore()
         _store = StateObject(wrappedValue: store)
         delegate.store = store
@@ -87,11 +90,11 @@ private struct MenuContents: View {
     @ObservedObject var runtime: CursorRuntime
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Text(runtime.status)
+        RuntimeStatusText(status: runtime.statusDisplay)
         Button(L("打开 Gallery")) { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true); store.refreshDockVisibility() }
         Button(runtime.enabled ? L("停用并恢复光标") : L("应用当前主题")) {
-            if runtime.enabled { runtime.stop() } else { store.applyCurrentTheme() }
-        }
+            if runtime.enabled { store.stopTheme() } else { store.applyCurrentTheme() }
+        }.disabled(!store.canSwitchTheme)
         if runtime.hasRecovery && !runtime.enabled { Button(L("恢复上次光标")) { runtime.recover() } }
         Divider()
         Button(L("退出 Gallery")) { NSApp.terminate(nil) }.keyboardShortcut("q")

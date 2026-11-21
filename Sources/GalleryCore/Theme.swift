@@ -161,11 +161,17 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
     public var idleEnabled = true
     public var clickEnabled = true
     public var excludedBundleIDs: [String] = []
+    /// Original materials and edit-time bindings. Runtime roles below are
+    /// independent value copies, never references into this material shelf.
+    public var mapping: ThemeMapping?
+    public func roleFamily(_ id: String) -> String {
+        mapping?.detailedNativeRoles == true ? NativeCursorCatalog.identity(id) : CursorCatalog.family(id)
+    }
     public init(name: String, author: String = "", roles: [CursorRole]) {
         self.name = name; self.author = author; self.roles = roles
     }
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, name, author, roles, pointerScale, appearance, coverFrame, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs
+        case formatVersion, name, author, roles, pointerScale, appearance, coverFrame, idleDelay, idleEnabled, clickEnabled, excludedBundleIDs, mapping
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -180,6 +186,7 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         idleEnabled = try c.decode(Bool.self, forKey: .idleEnabled)
         clickEnabled = try c.decode(Bool.self, forKey: .clickEnabled)
         excludedBundleIDs = try c.decode([String].self, forKey: .excludedBundleIDs)
+        mapping = try c.decodeIfPresent(ThemeMapping.self, forKey: .mapping)
     }
     public func validate() throws {
         guard formatVersion == 1, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -189,22 +196,28 @@ public struct GalleryTheme: Codable, Equatable, Sendable {
         }
         if let coverFrame, coverFrame.isEmpty || coverFrame.count > 8_000_000 { throw ThemeError.invalid(L("主题封面图像无效或过大。")) }
         for role in roles {
-            if let delay = role.idleDelayOverride, !delay.isFinite || !(1...600).contains(delay) {
-                throw ThemeError.invalid(L("角色待机等待时间应为 1–600 秒。"))
-            }
-            guard role.id.hasPrefix("com.apple."), role.clip(.normal) != nil, role.scale.isFinite, (0.25...3).contains(role.scale),
-                  role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }) else {
-                throw ThemeError.invalid(L("每个光标必须有常态动画及有效的系统标识。"))
-            }
-            for clip in role.clips.values { try clip.validate() }
-            guard role.variants.count <= Motion.allCases.count, role.variants.allSatisfy({ Motion(rawValue: $0.key) != nil && $0.value.count <= 32 }),
-                  role.selectedVariants.allSatisfy({ motion, id in role.variants[motion]?.contains(where: { $0.id == id }) == true }) else {
-                throw ThemeError.invalid(L("素材选项或所选版本无效。"))
-            }
-            for variants in role.variants.values {
-                guard Set(variants.map(\.id)).count == variants.count else { throw ThemeError.invalid(L("素材版本标识重复。")) }
-                for variant in variants { try variant.clip.validate() }
-            }
+            try Self.validateRole(role)
+        }
+        try mapping?.validate()
+    }
+    static func validateRole(_ role: CursorRole) throws {
+        if let delay = role.idleDelayOverride, !delay.isFinite || !(1...600).contains(delay) {
+            throw ThemeError.invalid(L("角色待机等待时间应为 1–600 秒。"))
+        }
+        guard role.id.hasPrefix("com.apple."), role.id.utf8.count <= 256,
+              role.id.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45,46,95].contains($0) }),
+              role.clip(.normal) != nil, role.scale.isFinite, (0.25...3).contains(role.scale),
+              role.clips.keys.allSatisfy({ Motion(rawValue: $0) != nil }) else {
+            throw ThemeError.invalid(L("每个光标必须有常态动画及有效的系统标识。"))
+        }
+        for clip in role.clips.values { try clip.validate() }
+        guard role.variants.count <= Motion.allCases.count, role.variants.allSatisfy({ Motion(rawValue: $0.key) != nil && $0.value.count <= 32 }),
+              role.selectedVariants.allSatisfy({ motion, id in role.variants[motion]?.contains(where: { $0.id == id }) == true }) else {
+            throw ThemeError.invalid(L("素材选项或所选版本无效。"))
+        }
+        for variants in role.variants.values {
+            guard Set(variants.map(\.id)).count == variants.count else { throw ThemeError.invalid(L("素材版本标识重复。")) }
+            for variant in variants { try variant.clip.validate() }
         }
     }
 }
